@@ -1,12 +1,12 @@
 ﻿# Backend (FastAPI)
 
-Backend предоставляет API для:
-- мониторинга сервиса (`/health`)
-- списка магазинов
-- KPI-агрегаций и временных рядов
-- ML-прогноза продаж
+API service for:
+- service health (`/health`)
+- store catalog
+- KPI aggregation and sales time series
+- ML sales forecast with interval outputs
 
-## Подготовка (Ubuntu 24.04)
+## Setup
 
 ```bash
 cd backend
@@ -16,9 +16,8 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-## Конфигурация
+## Required Root `.env`
 
-Создайте `.env` в корне репозитория (`../.env`) и заполните:
 - `DATABASE_URL`
 - `CORS_ORIGINS`
 - `MODEL_PATH`
@@ -26,15 +25,14 @@ pip install -r requirements.txt
 - `BACKEND_HOST`
 - `BACKEND_PORT`
 
-## Запуск
+## Run
 
 ```bash
-cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Документация Swagger: `http://localhost:8000/docs`
+Swagger docs: `http://localhost:8000/docs`
 
-## API base
+## API Prefix
 
-Все рабочие эндпоинты находятся под префиксом: `/api/v1`
+All business endpoints are under `/api/v1`.

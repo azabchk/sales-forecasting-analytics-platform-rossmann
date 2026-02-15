@@ -6,7 +6,24 @@ training:
   random_state: 42
   model_path: artifacts/model.joblib
   metadata_path: artifacts/model_metadata.json
+  target_transform: log1p
+  prediction_floor: 0.0
+  prediction_cap_quantile: 0.997
+  early_stopping_rounds: 60
+  catboost_param_grid:
+    - depth: 8
+      learning_rate: 0.05
+      l2_leaf_reg: 3.0
+      iterations: 500
+    - depth: 10
+      learning_rate: 0.03
+      l2_leaf_reg: 5.0
+      iterations: 700
+    - depth: 6
+      learning_rate: 0.07
+      l2_leaf_reg: 2.0
+      iterations: 450
 
 forecast:
   default_horizon_days: 30
-  history_days: 60
+  history_days: 90

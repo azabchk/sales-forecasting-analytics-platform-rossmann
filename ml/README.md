@@ -1,23 +1,27 @@
-﻿# ML модуль
+﻿# ML Module
 
-Модуль отвечает за обучение и применение модели прогноза ежедневных продаж по магазину.
+Modeling package for store-level daily sales forecasting.
 
-## Функциональность
+## What It Does
 
-- извлечение данных из PostgreSQL DWH
-- построение признаков:
-  - лаги `1, 7, 14, 28`
-  - скользящие средние `7, 14, 28`
-  - календарные признаки
-  - promo/holiday + метаданные магазина
-- time-based split (без случайного разбиения)
-- сравнение моделей:
-  - Baseline: `Ridge`
-  - Advanced: `CatBoostRegressor`
-- метрики: `MAE`, `RMSE`
-- сохранение артефактов в `ml/artifacts/`
+- reads prepared fact/dimension data from PostgreSQL
+- builds time-series features (lags, rolling means/std, trend index)
+- applies target transformation (`log1p`) for robust training
+- evaluates Ridge baseline and CatBoost grid candidates
+- selects model by validation RMSE
+- exports:
+  - `ml/artifacts/model.joblib`
+  - `ml/artifacts/model_metadata.json`
 
-## Запуск (Ubuntu 24.04)
+## Metrics
+
+Validation metrics include:
+- `MAE`
+- `RMSE`
+- `MAPE`
+- `WAPE`
+
+## Run
 
 ```bash
 cd ml
@@ -29,11 +33,6 @@ python train.py --config config.yaml
 python evaluate.py --config config.yaml
 ```
 
-## Артефакты
+## Offline Prediction Script
 
-- `ml/artifacts/model.joblib` — сериализованная модель + служебные поля
-- `ml/artifacts/model_metadata.json` — дата обучения, метрики, список признаков, периоды train/val
-
-## Инференс
-
-Скрипт `predict.py` используется backend-сервисом для прогноза на горизонт `N` дней.
+`predict.py` can run recursive forecasts from CLI using saved model artifacts.

@@ -2,7 +2,6 @@
 
 import argparse
 import os
-from dataclasses import dataclass
 from pathlib import Path
 
 import joblib
@@ -13,14 +12,6 @@ import yaml
 from dotenv import load_dotenv
 
 from features import encode_features
-
-
-@dataclass
-class ForecastContext:
-    store_id: int
-    horizon_days: int
-    history: pd.DataFrame
-    store_meta: pd.Series
 
 
 def load_config(config_path: str) -> tuple[dict, Path]:
@@ -40,7 +31,7 @@ def load_artifact(model_path: Path) -> dict:
     return joblib.load(model_path)
 
 
-def fetch_history(engine: sa.Engine, store_id: int, history_days: int = 60) -> pd.DataFrame:
+def fetch_history(engine: sa.Engine, store_id: int, history_days: int = 90) -> pd.DataFrame:
     query = sa.text(
         """
         SELECT
@@ -59,7 +50,7 @@ def fetch_history(engine: sa.Engine, store_id: int, history_days: int = 60) -> p
     )
     df = pd.read_sql(query, engine, params={"store_id": store_id, "history_days": history_days})
     if df.empty:
-        raise ValueError(f"Не найдена история для store_id={store_id}")
+        raise ValueError(f"No history found for store_id={store_id}")
     df["full_date"] = pd.to_datetime(df["full_date"])
     return df.sort_values("full_date").reset_index(drop=True)
 
@@ -79,8 +70,41 @@ def fetch_store_meta(engine: sa.Engine, store_id: int) -> pd.Series:
     )
     df = pd.read_sql(query, engine, params={"store_id": store_id})
     if df.empty:
-        raise ValueError(f"store_id={store_id} отсутствует в dim_store")
+        raise ValueError(f"store_id={store_id} does not exist in dim_store")
     return df.iloc[0]
+
+
+def safe_lag(values: list[float], offset: int) -> float:
+    if len(values) >= offset:
+        return float(values[-offset])
+    return float(values[-1])
+
+
+def safe_mean(values: list[float], window: int) -> float:
+    if not values:
+        return 0.0
+    window_slice = values[-window:] if len(values) >= window else values
+    return float(np.mean(window_slice))
+
+
+def safe_std(values: list[float], window: int) -> float:
+    if len(values) < 2:
+        return 0.0
+    window_slice = values[-window:] if len(values) >= window else values
+    return float(np.std(window_slice, ddof=0))
+
+
+def inverse_target_transform(prediction: float, target_transform: str) -> float:
+    if target_transform == "log1p":
+        return float(np.expm1(prediction))
+    return float(prediction)
+
+
+def postprocess_prediction(prediction: float, floor: float, cap: float | None) -> float:
+    pred = max(prediction, floor)
+    if cap is not None:
+        pred = min(pred, cap)
+    return float(pred)
 
 
 def build_feature_row(
@@ -88,15 +112,10 @@ def build_feature_row(
     forecast_date: pd.Timestamp,
     sales_history: list[float],
     store_meta: pd.Series,
+    base_days_since_start: int,
+    step: int,
 ) -> dict:
-    def safe_lag(offset: int) -> float:
-        if len(sales_history) >= offset:
-            return float(sales_history[-offset])
-        return float(sales_history[-1])
-
-    def safe_roll(window: int) -> float:
-        window_slice = sales_history[-window:] if len(sales_history) >= window else sales_history
-        return float(np.mean(window_slice))
+    rolling_7 = safe_mean(sales_history, 7)
 
     return {
         "store_id": int(store_id),
@@ -110,13 +129,18 @@ def build_feature_row(
         "quarter": int((forecast_date.month - 1) // 3 + 1),
         "week_of_year": int(forecast_date.isocalendar().week),
         "is_weekend": int((forecast_date.dayofweek + 1) in [6, 7]),
-        "lag_1": safe_lag(1),
-        "lag_7": safe_lag(7),
-        "lag_14": safe_lag(14),
-        "lag_28": safe_lag(28),
-        "rolling_mean_7": safe_roll(7),
-        "rolling_mean_14": safe_roll(14),
-        "rolling_mean_28": safe_roll(28),
+        "days_since_start": int(base_days_since_start + step),
+        "lag_1": safe_lag(sales_history, 1),
+        "lag_7": safe_lag(sales_history, 7),
+        "lag_14": safe_lag(sales_history, 14),
+        "lag_28": safe_lag(sales_history, 28),
+        "rolling_mean_7": rolling_7,
+        "rolling_mean_14": safe_mean(sales_history, 14),
+        "rolling_mean_28": safe_mean(sales_history, 28),
+        "rolling_std_7": safe_std(sales_history, 7),
+        "rolling_std_14": safe_std(sales_history, 14),
+        "rolling_std_28": safe_std(sales_history, 28),
+        "lag_1_to_mean_7_ratio": safe_lag(sales_history, 1) / rolling_7 if rolling_7 > 0 else 1.0,
         "state_holiday": "0",
         "store_type": str(store_meta["store_type"]),
         "assortment": str(store_meta["assortment"]),
@@ -128,7 +152,7 @@ def forecast_store(
     artifact: dict,
     store_id: int,
     horizon_days: int,
-    history_days: int = 60,
+    history_days: int = 90,
 ) -> list[dict]:
     history = fetch_history(engine, store_id=store_id, history_days=history_days)
     store_meta = fetch_store_meta(engine, store_id=store_id)
@@ -136,26 +160,45 @@ def forecast_store(
     model = artifact["model"]
     categorical_columns = artifact["categorical_columns"]
     feature_columns = artifact["feature_columns"]
+    target_transform = str(artifact.get("target_transform", "none"))
+    floor = float(artifact.get("prediction_floor", 0.0))
+    cap = float(artifact["prediction_cap"]) if artifact.get("prediction_cap") is not None else None
+    sigma = float(artifact.get("prediction_interval_sigma", 0.0))
+    z_score = 1.28
 
     sales_history = history["sales"].astype(float).tolist()
     last_date = history["full_date"].max()
+    base_days_since_start = len(sales_history) - 1
 
     predictions: list[dict] = []
     for step in range(1, horizon_days + 1):
         forecast_date = last_date + pd.Timedelta(days=step)
-        feature_row = build_feature_row(store_id, forecast_date, sales_history, store_meta)
+        feature_row = build_feature_row(
+            store_id=store_id,
+            forecast_date=forecast_date,
+            sales_history=sales_history,
+            store_meta=store_meta,
+            base_days_since_start=base_days_since_start,
+            step=step,
+        )
 
         x_raw = pd.DataFrame([feature_row])
         x, _ = encode_features(x_raw, categorical_columns, feature_columns=feature_columns)
 
-        pred = float(model.predict(x)[0])
-        pred = max(pred, 0.0)
+        pred_model = float(model.predict(x)[0])
+        pred = inverse_target_transform(pred_model, target_transform)
+        pred = postprocess_prediction(pred, floor, cap)
+
+        lower = postprocess_prediction(pred - z_score * sigma, floor, cap)
+        upper = postprocess_prediction(pred + z_score * sigma, floor, cap)
 
         sales_history.append(pred)
         predictions.append(
             {
                 "date": forecast_date.date().isoformat(),
                 "predicted_sales": pred,
+                "predicted_lower": lower,
+                "predicted_upper": upper,
             }
         )
 
@@ -186,7 +229,7 @@ def main() -> None:
         artifact=artifact,
         store_id=args.store_id,
         horizon_days=args.horizon_days,
-        history_days=int(cfg["forecast"].get("history_days", 60)),
+        history_days=int(cfg["forecast"].get("history_days", 90)),
     )
 
     for row in result:

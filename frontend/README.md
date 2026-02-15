@@ -1,30 +1,26 @@
 ﻿# Frontend (React + TypeScript)
 
-Интерфейс аналитической платформы с тремя разделами:
-- Overview (KPI + общий график)
-- Store Analytics (магазин, дневная динамика, promo impact)
-- Forecast (прогноз на N дней)
+Professional analytics UI with three pages:
+- `Overview` - KPI monitoring and portfolio trend view
+- `Store Analytics` - store filter, daily sales/customers trend, promo impact table
+- `Forecast` - scenario controls, forecast chart, confidence interval lines
 
-## Подготовка (Ubuntu 24.04)
+## Setup
 
 ```bash
 cd frontend
+cp .env.example .env
 npm install
 ```
 
-## Переменные окружения
-
-Создайте файл `frontend/.env`:
+## Run
 
 ```bash
-cp .env.example .env
-```
-
-## Запуск
-
-```bash
-cd frontend
 npm run dev
 ```
 
-Приложение будет доступно на `http://localhost:5173`.
+App URL: `http://localhost:5173`
+
+## Environment Variable
+
+`VITE_API_BASE_URL=http://localhost:8000/api/v1`

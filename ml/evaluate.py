@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 import sqlalchemy as sa
 import yaml
@@ -50,6 +51,33 @@ def load_eval_data(engine: sa.Engine) -> pd.DataFrame:
     return df
 
 
+def inverse_target_transform(predictions: np.ndarray, target_transform: str) -> np.ndarray:
+    if target_transform == "log1p":
+        return np.expm1(predictions)
+    return predictions
+
+
+def postprocess_predictions(predictions: np.ndarray, floor: float, cap: float | None) -> np.ndarray:
+    clipped = np.maximum(predictions, floor)
+    if cap is not None:
+        clipped = np.minimum(clipped, cap)
+    return clipped
+
+
+def evaluate_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+    eps = 1e-8
+    mae = mean_absolute_error(y_true, y_pred)
+    rmse = root_mean_squared_error(y_true, y_pred)
+    mape = np.mean(np.abs((y_true - y_pred) / np.maximum(np.abs(y_true), eps))) * 100
+    wape = np.sum(np.abs(y_true - y_pred)) / np.maximum(np.sum(np.abs(y_true)), eps) * 100
+    return {
+        "mae": float(mae),
+        "rmse": float(rmse),
+        "mape": float(mape),
+        "wape": float(wape),
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate saved model")
     parser.add_argument("--config", required=True, help="Path to config.yaml")
@@ -75,9 +103,11 @@ def main() -> None:
     max_date = df["full_date"].max()
     cutoff = max_date - pd.Timedelta(days=int(cfg["training"].get("validation_days", 60)))
     val_df = df[df["full_date"] > cutoff].copy()
+    if val_df.empty:
+        raise ValueError("Validation slice is empty")
 
     x_raw = val_df[artifact["raw_feature_columns"]].copy()
-    y_true = val_df["sales"].astype(float)
+    y_true = val_df["sales"].astype(float).to_numpy()
 
     x, _ = encode_features(
         x_raw,
@@ -87,15 +117,19 @@ def main() -> None:
 
     model = artifact["model"]
     y_pred = model.predict(x)
+    y_pred = inverse_target_transform(y_pred, str(artifact.get("target_transform", "none")))
+    y_pred = postprocess_predictions(
+        y_pred,
+        float(artifact.get("prediction_floor", 0.0)),
+        float(artifact["prediction_cap"]) if artifact.get("prediction_cap") is not None else None,
+    )
 
-    mae = mean_absolute_error(y_true, y_pred)
-    rmse = root_mean_squared_error(y_true, y_pred)
+    metrics = evaluate_metrics(y_true, y_pred)
 
     result = {
         "model_name": artifact.get("model_name", "unknown"),
-        "mae": float(mae),
-        "rmse": float(rmse),
         "validation_rows": int(len(val_df)),
+        "metrics": metrics,
     }
 
     print(json.dumps(result, ensure_ascii=False, indent=2))

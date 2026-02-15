@@ -37,6 +37,8 @@ export type PromoImpactPoint = {
 export type ForecastPoint = {
   date: string;
   predicted_sales: number;
+  predicted_lower?: number | null;
+  predicted_upper?: number | null;
 };
 
 export async function fetchStores(): Promise<Store[]> {

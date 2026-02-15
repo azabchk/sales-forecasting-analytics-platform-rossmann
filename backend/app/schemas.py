@@ -49,3 +49,5 @@ class ForecastRequest(BaseModel):
 class ForecastPoint(BaseModel):
     date: date
     predicted_sales: float
+    predicted_lower: float | None = None
+    predicted_upper: float | None = None

@@ -19,18 +19,23 @@ def add_calendar_features(df: pd.DataFrame, date_col: str = "full_date") -> pd.D
 
 def add_lag_and_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
     out = df.sort_values(["store_id", "full_date"]).copy()
+    out["days_since_start"] = out.groupby("store_id").cumcount()
 
     for lag in LAG_WINDOWS:
         out[f"lag_{lag}"] = out.groupby("store_id")["sales"].shift(lag)
 
     for window in ROLL_WINDOWS:
         out[f"rolling_mean_{window}"] = (
-            out.groupby("store_id")["sales"]
-            .shift(1)
-            .rolling(window=window, min_periods=1)
-            .mean()
-            .reset_index(level=0, drop=True)
+            out.groupby("store_id")["sales"].transform(lambda s: s.shift(1).rolling(window=window, min_periods=1).mean())
         )
+        out[f"rolling_std_{window}"] = (
+            out.groupby("store_id")["sales"]
+            .transform(lambda s: s.shift(1).rolling(window=window, min_periods=2).std())
+            .fillna(0.0)
+        )
+
+    out["lag_1_to_mean_7_ratio"] = out["lag_1"] / out["rolling_mean_7"].replace(0, pd.NA)
+    out["lag_1_to_mean_7_ratio"] = out["lag_1_to_mean_7_ratio"].fillna(1.0)
 
     return out
 
