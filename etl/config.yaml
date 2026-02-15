@@ -1,0 +1,10 @@
+﻿paths:
+  train_csv: ../data/train.csv
+  store_csv: ../data/store.csv
+
+etl:
+  truncate_reload: true
+  chunksize: 50000
+
+database:
+  url_env: DATABASE_URL

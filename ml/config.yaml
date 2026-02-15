@@ -1,0 +1,12 @@
+﻿database:
+  url_env: DATABASE_URL
+
+training:
+  validation_days: 60
+  random_state: 42
+  model_path: artifacts/model.joblib
+  metadata_path: artifacts/model_metadata.json
+
+forecast:
+  default_horizon_days: 30
+  history_days: 60
