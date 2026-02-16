@@ -2,14 +2,14 @@
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
-from app.routers import forecast, health, kpi, sales, stores
+from app.routers import forecast, health, kpi, sales, stores, system
 
 settings = get_settings()
 
 app = FastAPI(
     title="Rossmann Sales Forecast API",
-    description="API для KPI, таймсерий и прогноза продаж",
-    version="1.0.0",
+    description="API for KPI analytics, timeseries exploration, and sales forecasting",
+    version="3.0.0",
 )
 
 app.add_middleware(
@@ -25,3 +25,4 @@ app.include_router(stores.router, prefix="/api/v1", tags=["stores"])
 app.include_router(kpi.router, prefix="/api/v1", tags=["kpi"])
 app.include_router(sales.router, prefix="/api/v1", tags=["sales"])
 app.include_router(forecast.router, prefix="/api/v1", tags=["forecast"])
+app.include_router(system.router, prefix="/api/v1", tags=["system"])

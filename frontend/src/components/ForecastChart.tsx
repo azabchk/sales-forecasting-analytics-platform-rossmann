@@ -1,5 +1,7 @@
-﻿import React from "react";
-import { Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import React from "react";
+import { Area, AreaChart, CartesianGrid, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+
+import { formatCompact, formatDateLabel, formatInt } from "../lib/format";
 
 type ForecastPoint = {
   date: string;
@@ -8,11 +10,51 @@ type ForecastPoint = {
   predicted_upper?: number | null;
 };
 
+type TooltipRow = {
+  dataKey: string;
+  value: number;
+};
+
+function ForecastTooltip({
+  active,
+  label,
+  payload,
+}: {
+  active?: boolean;
+  label?: string;
+  payload?: TooltipRow[];
+}) {
+  if (!active || !payload || !label) {
+    return null;
+  }
+
+  const predicted = payload.find((entry) => entry.dataKey === "predicted_sales")?.value ?? 0;
+  const lower = payload.find((entry) => entry.dataKey === "predicted_lower")?.value;
+  const upper = payload.find((entry) => entry.dataKey === "predicted_upper")?.value;
+
+  return (
+    <div className="chart-tooltip">
+      <p className="chart-tooltip-title">{formatDateLabel(label)}</p>
+      <p className="chart-tooltip-line">Predicted: {formatInt(predicted)}</p>
+      {typeof lower === "number" && typeof upper === "number" && (
+        <p className="chart-tooltip-line">
+          Band: {formatInt(lower)} to {formatInt(upper)}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export default function ForecastChart({ data }: { data: ForecastPoint[] }) {
+  const total = data.reduce((acc, row) => acc + row.predicted_sales, 0);
+
   return (
     <div className="panel">
-      <h3>Forecast Horizon</h3>
-      <div style={{ width: "100%", height: 340 }}>
+      <div className="panel-head">
+        <h3>Forecast Horizon</h3>
+        <p className="panel-subtitle">{formatCompact(total)} projected across selected horizon</p>
+      </div>
+      <div style={{ width: "100%", height: 360 }}>
         <ResponsiveContainer>
           <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
             <defs>
@@ -22,15 +64,13 @@ export default function ForecastChart({ data }: { data: ForecastPoint[] }) {
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" stroke="#dfe9e4" />
-            <XAxis dataKey="date" minTickGap={26} stroke="#6a7c74" />
-            <YAxis stroke="#6a7c74" />
+            <XAxis dataKey="date" minTickGap={26} stroke="#53736a" tickFormatter={formatDateLabel} />
+            <YAxis stroke="#53736a" tickFormatter={(value) => formatCompact(Number(value))} />
             <Tooltip
-              contentStyle={{
-                borderRadius: 10,
-                border: "1px solid #cfe0d8",
-                boxShadow: "0 8px 22px rgba(16, 58, 46, 0.12)",
-              }}
+              content={<ForecastTooltip />}
+              wrapperStyle={{ outline: "none" }}
             />
+            <Legend />
             <Area type="monotone" dataKey="predicted_sales" stroke="none" fill="url(#intervalGradient)" isAnimationActive />
             <Line
               type="monotone"

@@ -5,6 +5,7 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+**/.venv311/
 
 # Environment
 .env
@@ -17,6 +18,8 @@ venv/
 # ML artifacts
 /ml/artifacts/*
 !/ml/artifacts/.gitkeep
+ml/catboost_info/
+catboost_info/
 
 # Node
 node_modules/

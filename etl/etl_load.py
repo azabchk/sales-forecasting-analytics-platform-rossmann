@@ -31,7 +31,7 @@ def load_config(path: str) -> ETLConfig:
 
     db_url = os.getenv(cfg["database"]["url_env"])
     if not db_url:
-        raise ValueError("DATABASE_URL не задан в окружении или .env")
+        raise ValueError("DATABASE_URL is not set in environment or .env")
 
     return ETLConfig(
         train_csv=str((config_path.parent / cfg["paths"]["train_csv"]).resolve()),
@@ -44,12 +44,12 @@ def load_config(path: str) -> ETLConfig:
 
 def load_raw_data(train_csv: str, store_csv: str) -> tuple[pd.DataFrame, pd.DataFrame]:
     if not os.path.exists(train_csv):
-        raise FileNotFoundError(f"Файл train.csv не найден: {train_csv}")
+        raise FileNotFoundError(f"train.csv not found: {train_csv}")
     if not os.path.exists(store_csv):
-        raise FileNotFoundError(f"Файл store.csv не найден: {store_csv}")
+        raise FileNotFoundError(f"store.csv not found: {store_csv}")
 
-    train_df = pd.read_csv(train_csv)
-    store_df = pd.read_csv(store_csv)
+    train_df = pd.read_csv(train_csv, low_memory=False)
+    store_df = pd.read_csv(store_csv, low_memory=False)
     return train_df, store_df
 
 
@@ -217,10 +217,10 @@ def insert_dataframe(
 
 
 def run_etl(cfg: ETLConfig) -> None:
-    print("[ETL] Загрузка исходных данных...")
+    print("[ETL] Loading source data...")
     train_raw, store_raw = load_raw_data(cfg.train_csv, cfg.store_csv)
 
-    print("[ETL] Очистка и подготовка...")
+    print("[ETL] Cleaning and preparing datasets...")
     dim_store = clean_store(store_raw)
     train = clean_train(train_raw)
     dim_date = build_date_dimension(train)
@@ -232,13 +232,13 @@ def run_etl(cfg: ETLConfig) -> None:
         raw_conn = conn.connection
 
         if cfg.truncate_reload:
-            print("[ETL] Truncate + reload стратегия...")
+            print("[ETL] Running truncate + reload strategy...")
             conn.execute(sa.text("TRUNCATE TABLE fact_sales_daily RESTART IDENTITY CASCADE"))
             conn.execute(sa.text("TRUNCATE TABLE dim_date RESTART IDENTITY CASCADE"))
             conn.execute(sa.text("TRUNCATE TABLE dim_store RESTART IDENTITY CASCADE"))
 
-        print("[ETL] Загрузка dim_store...")
-        store_rows = [tuple(x) for x in dim_store.to_records(index=False)]
+        print("[ETL] Loading dim_store...")
+        store_rows = list(dim_store.itertuples(index=False, name=None))
         insert_dataframe(
             raw_conn,
             "dim_store",
@@ -270,8 +270,8 @@ def run_etl(cfg: ETLConfig) -> None:
             page_size=cfg.chunksize,
         )
 
-        print("[ETL] Загрузка dim_date...")
-        date_rows = [tuple(x) for x in dim_date.to_records(index=False)]
+        print("[ETL] Loading dim_date...")
+        date_rows = list(dim_date.itertuples(index=False, name=None))
         insert_dataframe(
             raw_conn,
             "dim_date",
@@ -295,8 +295,8 @@ def run_etl(cfg: ETLConfig) -> None:
         fact = prepare_fact(train, dim_date_map)
         print(f"[ETL] Rows: fact_sales_daily={len(fact)}")
 
-        print("[ETL] Загрузка fact_sales_daily...")
-        fact_rows = [tuple(x) for x in fact.to_records(index=False)]
+        print("[ETL] Loading fact_sales_daily...")
+        fact_rows = list(fact.itertuples(index=False, name=None))
         insert_dataframe(
             raw_conn,
             "fact_sales_daily",
@@ -316,12 +316,12 @@ def run_etl(cfg: ETLConfig) -> None:
             page_size=cfg.chunksize,
         )
 
-    print("[ETL] Успешно завершено.")
+    print("[ETL] Completed successfully.")
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="ETL: загрузка Rossmann в PostgreSQL")
-    parser.add_argument("--config", required=True, help="Путь к YAML конфигу")
+    parser = argparse.ArgumentParser(description="ETL: load Rossmann dataset into PostgreSQL")
+    parser.add_argument("--config", required=True, help="Path to YAML config")
     args = parser.parse_args()
 
     cfg = load_config(args.config)

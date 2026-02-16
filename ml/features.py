@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 LAG_WINDOWS = [1, 7, 14, 28]
@@ -34,8 +35,8 @@ def add_lag_and_rolling_features(df: pd.DataFrame) -> pd.DataFrame:
             .fillna(0.0)
         )
 
-    out["lag_1_to_mean_7_ratio"] = out["lag_1"] / out["rolling_mean_7"].replace(0, pd.NA)
-    out["lag_1_to_mean_7_ratio"] = out["lag_1_to_mean_7_ratio"].fillna(1.0)
+    ratio = out["lag_1"] / out["rolling_mean_7"].replace(0, np.nan)
+    out["lag_1_to_mean_7_ratio"] = ratio.fillna(1.0).astype(float)
 
     return out
 

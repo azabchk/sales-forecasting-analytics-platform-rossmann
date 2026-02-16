@@ -20,7 +20,7 @@ def load_db_url(config_path: str) -> str:
     env_name = cfg["database"]["url_env"]
     db_url = os.getenv(env_name)
     if not db_url:
-        raise ValueError(f"Переменная окружения {env_name} не задана")
+        raise ValueError(f"Environment variable {env_name} is not set")
     return db_url
 
 
@@ -35,7 +35,7 @@ def check_missing_values(conn) -> list[str]:
     """
     row = conn.execute(sa.text(query)).mappings().first()
     if row and (row["miss_store"] > 0 or row["miss_date"] > 0 or row["miss_sales"] > 0):
-        issues.append(f"Найдены NULL в fact_sales_daily: {dict(row)}")
+        issues.append(f"NULL values found in fact_sales_daily: {dict(row)}")
     return issues
 
 
@@ -50,7 +50,7 @@ def check_duplicates(conn) -> list[str]:
     """
     dup_df = pd.read_sql(query, conn)
     if not dup_df.empty:
-        issues.append(f"Найдены дубликаты store_id/date_id, примеры: {dup_df.to_dict(orient='records')}")
+        issues.append(f"Duplicate store_id/date_id rows found, samples: {dup_df.to_dict(orient='records')}")
     return issues
 
 
@@ -75,9 +75,9 @@ def check_date_coverage(conn) -> list[str]:
     gap_row = conn.execute(sa.text(gap_query)).mappings().first()
 
     if range_row:
-        print(f"[DQ] Диапазон дат: {range_row['min_date']} .. {range_row['max_date']}")
+        print(f"[DQ] Date range: {range_row['min_date']} .. {range_row['max_date']}")
     if gap_row and gap_row["gap_days"] > 0:
-        issues.append(f"Найдены разрывы в dim_date: {gap_row['gap_days']}")
+        issues.append(f"Gaps found in dim_date: {gap_row['gap_days']}")
     return issues
 
 
@@ -92,13 +92,13 @@ def check_fk_integrity(conn) -> list[str]:
     """
     row = conn.execute(sa.text(query)).mappings().first()
     if row and row["broken_fk"] > 0:
-        issues.append(f"Нарушена ссылочная целостность fact -> dims: {row['broken_fk']}")
+        issues.append(f"Broken foreign keys between fact and dimensions: {row['broken_fk']}")
     return issues
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Data quality checks for Rossmann DWH")
-    parser.add_argument("--config", required=True, help="Путь к YAML конфигу")
+    parser.add_argument("--config", required=True, help="Path to YAML config")
     args = parser.parse_args()
 
     db_url = load_db_url(args.config)
@@ -112,12 +112,12 @@ def main() -> None:
         all_issues.extend(check_fk_integrity(conn))
 
     if all_issues:
-        print("[DQ] Обнаружены проблемы:")
+        print("[DQ] Issues found:")
         for issue in all_issues:
             print(f"- {issue}")
         sys.exit(1)
 
-    print("[DQ] Все проверки пройдены успешно.")
+    print("[DQ] All checks passed.")
 
 
 if __name__ == "__main__":

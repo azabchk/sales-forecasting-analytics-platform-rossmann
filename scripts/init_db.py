@@ -27,7 +27,7 @@ def run_sql_file(conn: sa.Connection, sql_file: Path) -> None:
     if not sql_file.exists():
         raise FileNotFoundError(f"SQL file not found: {sql_file}")
 
-    sql_script = sql_file.read_text(encoding="utf-8")
+    sql_script = sql_file.read_text(encoding="utf-8-sig")
     raw_conn = conn.connection
     with raw_conn.cursor() as cursor:
         cursor.execute(sql_script)

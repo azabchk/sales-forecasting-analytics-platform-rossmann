@@ -64,15 +64,29 @@ def time_split(df: pd.DataFrame, validation_days: int) -> tuple[pd.DataFrame, pd
 
 def evaluate_model(y_true: pd.Series, y_pred: np.ndarray) -> dict:
     eps = 1e-8
+    y_true_np = y_true.to_numpy(dtype=float)
+    y_pred_np = np.asarray(y_pred, dtype=float)
+    abs_error = np.abs(y_true_np - y_pred_np)
+
     mae = mean_absolute_error(y_true, y_pred)
     rmse = root_mean_squared_error(y_true, y_pred)
-    mape = np.mean(np.abs((y_true - y_pred) / np.maximum(np.abs(y_true), eps))) * 100
-    wape = np.sum(np.abs(y_true - y_pred)) / np.maximum(np.sum(np.abs(y_true)), eps) * 100
+    mape = np.mean(abs_error / np.maximum(np.abs(y_true_np), 1.0)) * 100
+    wape = np.sum(abs_error) / np.maximum(np.sum(np.abs(y_true_np)), eps) * 100
+
+    nonzero_mask = np.abs(y_true_np) > 1.0
+    if nonzero_mask.any():
+        mape_nonzero = np.mean(abs_error[nonzero_mask] / np.maximum(np.abs(y_true_np[nonzero_mask]), eps)) * 100
+    else:
+        mape_nonzero = None
+
+    smape = np.mean((2.0 * abs_error) / np.maximum(np.abs(y_true_np) + np.abs(y_pred_np), eps)) * 100
 
     return {
         "mae": float(mae),
         "rmse": float(rmse),
         "mape": float(mape),
+        "mape_nonzero": float(mape_nonzero) if mape_nonzero is not None else None,
+        "smape": float(smape),
         "wape": float(wape),
     }
 

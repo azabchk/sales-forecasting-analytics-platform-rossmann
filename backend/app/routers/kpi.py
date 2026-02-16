@@ -15,7 +15,7 @@ def kpi_summary(
     store_id: int | None = Query(default=None),
 ) -> KpiSummaryResponse:
     if date_from > date_to:
-        raise HTTPException(status_code=400, detail="date_from не может быть больше date_to")
+        raise HTTPException(status_code=400, detail="date_from cannot be greater than date_to")
 
     return get_kpi_summary(date_from=date_from, date_to=date_to, store_id=store_id)
 

@@ -17,7 +17,7 @@ def sales_timeseries(
     store_id: int | None = Query(default=None),
 ) -> list[SalesTimeseriesPoint]:
     if date_from > date_to:
-        raise HTTPException(status_code=400, detail="date_from не может быть больше date_to")
+        raise HTTPException(status_code=400, detail="date_from cannot be greater than date_to")
 
     return get_sales_timeseries(
         granularity=granularity,

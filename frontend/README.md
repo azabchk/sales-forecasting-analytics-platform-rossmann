@@ -1,4 +1,4 @@
-﻿# Frontend (React + TypeScript)
+# Frontend (React + TypeScript)
 
 Professional analytics UI with three pages:
 - `Overview` - KPI monitoring and portfolio trend view

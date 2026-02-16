@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 
 type Store = {
   store_id: number;
@@ -11,12 +11,15 @@ export default function StoreSelector(props: {
   onChange: (storeId?: number) => void;
   label?: string;
   includeAllOption?: boolean;
+  id?: string;
 }) {
+  const selectId = props.id || "store-select";
+
   return (
     <div className="field">
-      <label htmlFor="store-select">{props.label || "Store"}</label>
+      <label htmlFor={selectId}>{props.label || "Store"}</label>
       <select
-        id="store-select"
+        id={selectId}
         className="select"
         value={props.value ?? ""}
         onChange={(e) => {

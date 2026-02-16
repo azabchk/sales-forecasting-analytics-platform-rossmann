@@ -1,48 +1,64 @@
-﻿# Rossmann Sales Forecasting Analytics Platform
+# Rossmann Sales Forecasting Analytics Platform
 
-Production-style academic project for store-level sales analytics and demand forecasting.
+End-to-end platform for store-level analytics and demand forecasting:
+- ETL from CSV into PostgreSQL star schema
+- SQL KPI views
+- ML forecasting model (CatBoost/Ridge selection)
+- FastAPI backend (`/api/v1`)
+- React dashboard
 
-The platform provides:
-- end-to-end ETL from raw CSV into PostgreSQL star schema
-- KPI and time-series API endpoints for analytics dashboards
-- tuned ML model for daily sales forecasting with interval bands
-- modern React dashboard for overview, store analytics, and forecast monitoring
+## Version 3 Highlights
 
-## 1. Architecture
+- Professional multi-page dashboard:
+  - Executive Overview
+  - Store Analytics
+  - Forecast Studio
+  - Scenario Lab (new in V3)
+  - Model Intelligence
+- Forecast + planning UX:
+  - horizon presets (`7D`, `30D`, `90D`)
+  - confidence summary cards
+  - first-14-row preview table
+  - one-click CSV export
+- Scenario Lab (V3):
+  - baseline vs scenario simulation
+  - promo strategy modes (`as_is`, `always_on`, `weekends_only`, `off`)
+  - weekend open/close and school-holiday toggles
+  - demand shift slider (`-50%` to `+50%`)
+  - confidence-level selection (80/90/95%)
+  - scenario summary + upside/risk day tables + CSV export
+- Model governance:
+  - model quality diagnostics (MAE/RMSE/WAPE/sMAPE/non-zero MAPE)
+  - CatBoost candidate comparison
+  - feature importance chart
+  - system data footprint (stores and row counts)
+- Backend diagnostics APIs:
+  - `GET /api/v1/system/summary`
+  - `GET /api/v1/model/metadata`
+- New forecasting scenario API:
+  - `POST /api/v1/forecast/scenario`
+- Better reliability:
+  - cleaner API error handling in frontend
+  - live API status monitor in app shell
+  - route lazy-loading for better startup performance
+- CI/CD readiness:
+  - GitHub Actions workflow for backend compile checks and frontend production build
+
+## Project Structure
 
 ```text
-Raw CSV (train/store) -> ETL -> PostgreSQL DWH (dim/fact)
-                                 -> SQL KPI views
-                                 -> ML training + metadata
-                                 -> FastAPI (/api/v1)
-                                 -> React dashboard
+backend/     FastAPI app
+etl/         ETL + data quality checks
+ml/          model training and evaluation
+frontend/    React dashboard
+sql/         schema, views, indexes
+scripts/     automation scripts (Windows + Linux)
+data/        raw CSV input
 ```
 
-## 2. Tech Stack
+## Required Data
 
-- Data/ETL: Python, pandas, SQLAlchemy
-- DWH: PostgreSQL 16
-- ML: scikit-learn, CatBoost, joblib
-- Backend: FastAPI, Pydantic v2
-- Frontend: React, TypeScript, Vite, Recharts
-- Infra: Docker Compose
-
-## 3. Repository Layout
-
-```text
-backend/        FastAPI service
-etl/            ETL + data quality checks
-ml/             training, evaluation, prediction scripts
-frontend/       React dashboard
-sql/            schema, views, indexes
-scripts/        utility scripts (DB initialization)
-data/           source CSV files
-docs/           project documentation
-```
-
-## 4. Data Files
-
-Required in `data/`:
+Place these files in `data/`:
 - `train.csv`
 - `store.csv`
 
@@ -50,192 +66,148 @@ Optional:
 - `test.csv`
 - `sample_submission.csv`
 
-## 5. Environment Variables
+## Environment
 
-Create `.env` in repo root from `.env.example`.
+Create `.env` from `.env.example` in repo root.
 
 Key variables:
 - `DATABASE_URL`
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `MODEL_PATH`, `MODEL_METADATA_PATH`
-- `CORS_ORIGINS`
 - `VITE_API_BASE_URL`
 
-## 6. Run Guide (Windows 11, PowerShell)
+## Windows 11 (Recommended Local Flow)
 
-### 6.1 Prerequisites
-- Python 3.11+
-- Docker Desktop + Compose
-- Node.js 20+ and npm 10+
+### One-click run
 
-### 6.2 Setup + Run
-
-```powershell
-cd C:\Users\ادم\OneDrive\Desktop\vkr
-Copy-Item .env.example .env
-
-docker compose up -d postgres
+```bat
+run_all.bat
 ```
 
-ETL + DB initialization:
+### 1) Bootstrap (deps, DB init, ETL, train model)
 
 ```powershell
-cd etl
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-
-python ..\scripts\init_db.py
-python etl_load.py --config config.yaml
-python data_quality.py --config config.yaml
-cd ..
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap_local_windows.ps1
 ```
 
-ML training and evaluation:
+Default bootstrap assumptions:
+- PostgreSQL is installed locally and running
+- superuser login is `postgres` / `postgres`
+- application DB/user are auto-created (`rossmann`, `rossmann_user`)
+
+If your PostgreSQL superuser password differs:
 
 ```powershell
-cd ml
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-python train.py --config config.yaml
-python evaluate.py --config config.yaml
-cd ..
+powershell -ExecutionPolicy Bypass -File scripts/bootstrap_local_windows.ps1 -PostgresSuperPassword "YOUR_PASSWORD"
 ```
 
-Backend (Terminal 1):
+### 2) Start backend + frontend
 
 ```powershell
-cd backend
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+powershell -ExecutionPolicy Bypass -File scripts/start_local_windows.ps1
 ```
 
-Frontend (Terminal 2):
+### 3) Check status
 
 ```powershell
-cd frontend
-Copy-Item .env.example .env
-npm install
-npm run dev
+powershell -ExecutionPolicy Bypass -File scripts/status_local_windows.ps1
 ```
 
-Open:
+### 4) Stop services
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts/stop_local_windows.ps1
+```
+
+Or:
+
+```bat
+stop_all.bat
+```
+
+## Ubuntu Linux (Local Flow)
+
+### One-time prerequisites
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-venv python3-pip nodejs npm postgresql postgresql-contrib
+```
+
+### One-click run
+
+```bash
+chmod +x run_all.sh stop_all.sh scripts/*.sh
+./run_all.sh
+```
+
+### Step-by-step run
+
+1. Bootstrap (deps, DB init, ETL, train, evaluate):
+
+```bash
+chmod +x scripts/*.sh
+./scripts/bootstrap_local_linux.sh
+```
+
+2. Start backend + frontend:
+
+```bash
+./scripts/start_local_linux.sh
+```
+
+3. Check status:
+
+```bash
+./scripts/status_local_linux.sh
+```
+
+4. Stop services:
+
+```bash
+./scripts/stop_local_linux.sh
+```
+
+Or:
+
+```bash
+./stop_all.sh
+```
+
+## URLs
+
 - Frontend: `http://localhost:5173`
-- API docs: `http://localhost:8000/docs`
+- Backend docs: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/api/v1/health`
+- System Summary: `http://localhost:8000/api/v1/system/summary`
+- Model Metadata: `http://localhost:8000/api/v1/model/metadata`
+- Scenario Forecast API: `POST http://localhost:8000/api/v1/forecast/scenario`
 
-## 7. Run Guide (Ubuntu Linux)
+### Scenario API Example
 
-### 7.1 Prerequisites
-- Python 3.11+
-- Docker Engine + Docker Compose plugin
-- Node.js 20+ and npm 10+
-
-### 7.2 Setup + Run
-
-```bash
-cd ~/path/to/vkr
-cp .env.example .env
-
-docker compose up -d postgres
+```json
+{
+  "store_id": 1,
+  "horizon_days": 30,
+  "promo_mode": "always_on",
+  "weekend_open": true,
+  "school_holiday": 0,
+  "demand_shift_pct": 10,
+  "confidence_level": 0.9
+}
 ```
 
-ETL + DB initialization:
+## Manual Run (Cross-platform)
 
-```bash
-cd etl
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
+If you prefer manual commands, follow module READMEs:
+- `etl/README.md`
+- `ml/README.md`
+- `backend/README.md`
+- `frontend/README.md`
 
-python ../scripts/init_db.py
-python etl_load.py --config config.yaml
-python data_quality.py --config config.yaml
-cd ..
-```
+## Troubleshooting
 
-ML training and evaluation:
-
-```bash
-cd ml
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-python train.py --config config.yaml
-python evaluate.py --config config.yaml
-cd ..
-```
-
-Backend (Terminal 1):
-
-```bash
-cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Frontend (Terminal 2):
-
-```bash
-cd frontend
-cp .env.example .env
-npm install
-npm run dev
-```
-
-Open:
-- Frontend: `http://localhost:5173`
-- API docs: `http://localhost:8000/docs`
-
-## 8. Model Notes
-
-Current ML pipeline includes:
-- feature engineering with lags, rolling means/std, trend index, and ratio features
-- log-transformed target (`log1p`) for stability
-- CatBoost parameter-grid search + Ridge baseline
-- model selection by validation RMSE
-- calibrated prediction floor/cap and interval sigma for forecast bands
-- metadata export (`ml/artifacts/model_metadata.json`)
-
-## 9. API Surface (`/api/v1`)
-
-- `GET /health`
-- `GET /stores`
-- `GET /kpi/summary`
-- `GET /kpi/promo-impact`
-- `GET /sales/timeseries`
-- `POST /forecast`
-
-Forecast response includes:
-- `date`
-- `predicted_sales`
-- `predicted_lower`
-- `predicted_upper`
-
-## 10. Troubleshooting
-
-- DB connection error:
-  - verify `docker compose ps` shows `postgres` as running
-  - verify `DATABASE_URL` and PostgreSQL env values in `.env`
-- ETL missing files:
-  - verify `data/train.csv` and `data/store.csv`
-- Forecast/model error:
-  - run `ml/train.py` and verify `ml/artifacts/model.joblib`
-- Frontend cannot reach backend:
-  - check `frontend/.env` -> `VITE_API_BASE_URL=http://localhost:8000/api/v1`
-
-## 11. Development Notes
-
-- Re-run `python data_quality.py --config config.yaml` after each major ETL reload.
-- Re-train model after major data refreshes before using forecast endpoint.
-- Keep SQL scripts (`sql/`) as the source of truth for DWH structure.
+- If backend cannot connect DB, verify `.env` `DATABASE_URL` and PostgreSQL service status.
+- If frontend cannot call backend, verify `frontend/.env` contains `VITE_API_BASE_URL=http://localhost:8000/api/v1`.
+- If forecast fails, rerun model training and ensure `ml/artifacts/model.joblib` exists.
+- If model diagnostics endpoint fails, ensure `ml/artifacts/model_metadata.json` exists.
