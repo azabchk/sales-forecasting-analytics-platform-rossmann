@@ -11,6 +11,7 @@ import {
 import LoadingBlock from "../components/LoadingBlock";
 import ScenarioChart from "../components/ScenarioChart";
 import StoreSelector from "../components/StoreSelector";
+import { useI18n } from "../lib/i18n";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
 
 type PresetName = "baseline" | "promo_boost" | "cost_guard" | "risk_downturn";
@@ -53,6 +54,7 @@ function applyPreset(preset: PresetName) {
 }
 
 export default function ScenarioLab() {
+  const { locale, localeTag } = useI18n();
   const [stores, setStores] = React.useState<Store[]>([]);
   const [storeId, setStoreId] = React.useState<number | undefined>(undefined);
   const [horizon, setHorizon] = React.useState(30);
@@ -74,8 +76,12 @@ export default function ScenarioLab() {
           setStoreId(rows[0].store_id);
         }
       })
-      .catch((errorResponse) => setError(extractApiError(errorResponse, "Failed to load stores list.")));
-  }, []);
+      .catch((errorResponse) =>
+        setError(
+          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
+        )
+      );
+  }, [locale]);
 
   const points = result?.points ?? [];
   const summary = result?.summary;
@@ -100,7 +106,7 @@ export default function ScenarioLab() {
 
   async function runScenario() {
     if (!storeId) {
-      setError("Select a store to run scenario simulation.");
+      setError(locale === "ru" ? "Выберите магазин для симуляции сценария." : "Select a store to run scenario simulation.");
       return;
     }
 
@@ -117,9 +123,16 @@ export default function ScenarioLab() {
         confidence_level: confidenceLevel,
       });
       setResult(response);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
-      setError(extractApiError(errorResponse, "Scenario simulation failed. Verify backend and model artifacts."));
+      setError(
+        extractApiError(
+          errorResponse,
+          locale === "ru"
+            ? "Симуляция сценария не удалась. Проверьте backend и артефакты модели."
+            : "Scenario simulation failed. Verify backend and model artifacts."
+        )
+      );
     } finally {
       setLoading(false);
     }
@@ -162,23 +175,31 @@ export default function ScenarioLab() {
         <div className="panel-head">
           <h3>{title}</h3>
           <p className="panel-subtitle">
-            {mode === "up" ? "Days with highest upside under current scenario." : "Days with highest downside risk under current scenario."}
+            {mode === "up"
+              ? locale === "ru"
+                ? "Дни с наибольшим потенциалом роста в текущем сценарии."
+                : "Days with highest upside under current scenario."
+              : locale === "ru"
+                ? "Дни с наибольшим риском снижения в текущем сценарии."
+                : "Days with highest downside risk under current scenario."}
           </p>
         </div>
         <div className="table-wrap">
           <table className="table">
             <thead>
               <tr>
-                <th>Date</th>
-                <th>Baseline</th>
-                <th>Scenario</th>
-                <th>Delta</th>
+                <th>{locale === "ru" ? "Дата" : "Date"}</th>
+                <th>{locale === "ru" ? "База" : "Baseline"}</th>
+                <th>{locale === "ru" ? "Сценарий" : "Scenario"}</th>
+                <th>{locale === "ru" ? "Дельта" : "Delta"}</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={4}>No rows in this category for current settings.</td>
+                  <td colSpan={4}>
+                    {locale === "ru" ? "Нет строк в этой категории для текущих настроек." : "No rows in this category for current settings."}
+                  </td>
                 </tr>
               )}
               {rows.map((row) => (
@@ -200,23 +221,27 @@ export default function ScenarioLab() {
     <section className="page">
       <div className="page-head">
         <div>
-          <h2 className="page-title">Scenario Lab</h2>
-          <p className="page-note">What-if simulator for demand planning using promo strategy, operating rules, and demand shift assumptions.</p>
+          <h2 className="page-title">{locale === "ru" ? "Лаборатория сценариев" : "Scenario Lab"}</h2>
+          <p className="page-note">
+            {locale === "ru"
+              ? "What-if симулятор для планирования спроса на основе промо-стратегии, правил работы и сдвига спроса."
+              : "What-if simulator for demand planning using promo strategy, operating rules, and demand shift assumptions."}
+          </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">Last update: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
           <div className="preset-row">
             <button className="button ghost" type="button" onClick={() => applyScenarioPreset("baseline")}>
-              Baseline
+              {locale === "ru" ? "База" : "Baseline"}
             </button>
             <button className="button ghost" type="button" onClick={() => applyScenarioPreset("promo_boost")}>
-              Promo Boost
+              {locale === "ru" ? "Промо-рост" : "Promo Boost"}
             </button>
             <button className="button ghost" type="button" onClick={() => applyScenarioPreset("cost_guard")}>
-              Cost Guard
+              {locale === "ru" ? "Контроль затрат" : "Cost Guard"}
             </button>
             <button className="button ghost" type="button" onClick={() => applyScenarioPreset("risk_downturn")}>
-              Risk Downturn
+              {locale === "ru" ? "Риск спада" : "Risk Downturn"}
             </button>
           </div>
         </div>
@@ -224,9 +249,9 @@ export default function ScenarioLab() {
 
       <div className="panel">
         <div className="controls">
-          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label="Store" includeAllOption={false} id="scenario-store" />
+          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label={locale === "ru" ? "Магазин" : "Store"} includeAllOption={false} id="scenario-store" />
           <div className="field">
-            <label htmlFor="scenario-horizon">Horizon (days)</label>
+            <label htmlFor="scenario-horizon">{locale === "ru" ? "Горизонт (дни)" : "Horizon (days)"}</label>
             <input
               id="scenario-horizon"
               className="input"
@@ -238,21 +263,21 @@ export default function ScenarioLab() {
             />
           </div>
           <div className="field">
-            <label htmlFor="scenario-promo-mode">Promo mode</label>
+            <label htmlFor="scenario-promo-mode">{locale === "ru" ? "Режим промо" : "Promo mode"}</label>
             <select
               id="scenario-promo-mode"
               className="select"
               value={promoMode}
               onChange={(event) => setPromoMode(event.target.value as "as_is" | "always_on" | "weekends_only" | "off")}
             >
-              <option value="as_is">As Is (default no promo)</option>
-              <option value="always_on">Always On</option>
-              <option value="weekends_only">Weekends Only</option>
-              <option value="off">Always Off</option>
+              <option value="as_is">{locale === "ru" ? "Как есть (без промо)" : "As Is (default no promo)"}</option>
+              <option value="always_on">{locale === "ru" ? "Всегда включено" : "Always On"}</option>
+              <option value="weekends_only">{locale === "ru" ? "Только выходные" : "Weekends Only"}</option>
+              <option value="off">{locale === "ru" ? "Всегда выключено" : "Always Off"}</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="scenario-confidence">Confidence level</label>
+            <label htmlFor="scenario-confidence">{locale === "ru" ? "Уровень доверия" : "Confidence level"}</label>
             <select
               id="scenario-confidence"
               className="select"
@@ -273,7 +298,7 @@ export default function ScenarioLab() {
               checked={weekendOpen}
               onChange={(event) => setWeekendOpen(event.target.checked)}
             />
-            Keep weekend open
+            {locale === "ru" ? "Открыто по выходным" : "Keep weekend open"}
           </label>
           <label className="toggle-field" htmlFor="scenario-school-holiday">
             <input
@@ -282,10 +307,10 @@ export default function ScenarioLab() {
               checked={schoolHoliday === 1}
               onChange={(event) => setSchoolHoliday(event.target.checked ? 1 : 0)}
             />
-            Force school holiday
+            {locale === "ru" ? "Учитывать школьные каникулы" : "Force school holiday"}
           </label>
           <div className="field slider-field">
-            <label htmlFor="scenario-shift">Demand shift ({demandShiftPct}%)</label>
+            <label htmlFor="scenario-shift">{locale === "ru" ? "Сдвиг спроса" : "Demand shift"} ({demandShiftPct}%)</label>
             <input
               id="scenario-shift"
               type="range"
@@ -297,10 +322,10 @@ export default function ScenarioLab() {
             />
           </div>
           <button className="button primary" type="button" onClick={runScenario} disabled={loading || !storeId}>
-            {loading ? "Running..." : "Run scenario"}
+            {loading ? (locale === "ru" ? "Выполняется..." : "Running...") : locale === "ru" ? "Запустить сценарий" : "Run scenario"}
           </button>
           <button className="button" type="button" onClick={downloadScenarioCsv} disabled={points.length === 0}>
-            Download CSV
+            {locale === "ru" ? "Скачать CSV" : "Download CSV"}
           </button>
         </div>
       </div>
@@ -317,27 +342,27 @@ export default function ScenarioLab() {
         <>
           <div className="forecast-summary">
             <div className="summary-box">
-              <p className="label">Baseline total</p>
+              <p className="label">{locale === "ru" ? "Итого базовый" : "Baseline total"}</p>
               <p className="value">{formatInt(summary.total_baseline_sales)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Scenario total</p>
+              <p className="label">{locale === "ru" ? "Итого сценарий" : "Scenario total"}</p>
               <p className="value">{formatInt(summary.total_scenario_sales)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Total delta</p>
+              <p className="label">{locale === "ru" ? "Общая дельта" : "Total delta"}</p>
               <p className={`value ${summary.total_delta_sales >= 0 ? "positive" : "negative"}`}>{formatInt(summary.total_delta_sales)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Uplift</p>
+              <p className="label">{locale === "ru" ? "Рост" : "Uplift"}</p>
               <p className={`value ${summary.uplift_pct >= 0 ? "positive" : "negative"}`}>{formatPercent(summary.uplift_pct)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Avg daily delta</p>
+              <p className="label">{locale === "ru" ? "Средняя дневная дельта" : "Avg daily delta"}</p>
               <p className={`value ${summary.avg_daily_delta >= 0 ? "positive" : "negative"}`}>{formatDecimal(summary.avg_daily_delta)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Best delta day</p>
+              <p className="label">{locale === "ru" ? "Лучший день по дельте" : "Best delta day"}</p>
               <p className="value">
                 {summary.max_delta_date ?? "-"} ({formatInt(summary.max_delta_value)})
               </p>
@@ -346,13 +371,18 @@ export default function ScenarioLab() {
 
           {points.length > 0 && <ScenarioChart data={points} />}
 
-          {renderOpportunityTable("Top Opportunity Days", topPositiveDays, "up")}
-          {renderOpportunityTable("Top Risk Days", topRiskDays, "down")}
+          {renderOpportunityTable(locale === "ru" ? "Топ дней с потенциалом роста" : "Top Opportunity Days", topPositiveDays, "up")}
+          {renderOpportunityTable(locale === "ru" ? "Топ дней с риском падения" : "Top Risk Days", topRiskDays, "down")}
         </>
       )}
 
-      {!loading && !summary && !error && <p className="muted">Configure scenario controls and run the simulator to compare outcomes.</p>}
+      {!loading && !summary && !error && (
+        <p className="muted">
+          {locale === "ru"
+            ? "Настройте параметры сценария и запустите симулятор для сравнения результатов."
+            : "Configure scenario controls and run the simulator to compare outcomes."}
+        </p>
+      )}
     </section>
   );
 }
-

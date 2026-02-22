@@ -36,3 +36,16 @@ python evaluate.py --config config.yaml
 ## Offline Prediction Script
 
 `predict.py` can run recursive forecasts from CLI using saved model artifacts.
+
+## Chatbot Intent Model
+
+Train the chatbot intent classifier artifact used by backend chat routing:
+
+```bash
+cd ml
+source .venv/bin/activate
+python train_chatbot.py --config config.yaml
+```
+
+Output:
+- `ml/artifacts/chat_intent_model.joblib`

@@ -7,12 +7,14 @@ import SalesChart from "../components/SalesChart";
 import StoreSelector from "../components/StoreSelector";
 import { rangeFromPastDays } from "../lib/dates";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 function getDefaultRange() {
   return rangeFromPastDays(60);
 }
 
 export default function StoreAnalytics() {
+  const { locale, localeTag } = useI18n();
   const defaults = useMemo(() => getDefaultRange(), []);
 
   const [stores, setStores] = useState<Store[]>([]);
@@ -31,7 +33,11 @@ export default function StoreAnalytics() {
   React.useEffect(() => {
     fetchStores()
       .then(setStores)
-      .catch((errorResponse) => setError(extractApiError(errorResponse, "Failed to load stores list.")));
+      .catch((errorResponse) =>
+        setError(
+          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
+        )
+      );
   }, []);
 
   const applyPreset = React.useCallback((days: number) => {
@@ -68,13 +74,18 @@ export default function StoreAnalytics() {
           return b.avg_sales - a.avg_sales;
         })
       );
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
-      setError(extractApiError(errorResponse, "Failed to load store analytics. Check backend connectivity."));
+      setError(
+        extractApiError(
+          errorResponse,
+          locale === "ru" ? "Не удалось загрузить аналитику магазина. Проверьте соединение с backend." : "Failed to load store analytics. Check backend connectivity."
+        )
+      );
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, granularity, invalidRange, storeId]);
+  }, [dateFrom, dateTo, granularity, invalidRange, locale, localeTag, storeId]);
 
   React.useEffect(() => {
     load();
@@ -110,10 +121,14 @@ export default function StoreAnalytics() {
       <div className="page-head">
         <div>
           <h2 className="page-title">Store Analytics</h2>
-          <p className="page-note">Demand behavior diagnostics by store, with promo effect and customer mix context.</p>
+          <p className="page-note">
+            {locale === "ru"
+              ? "Диагностика спроса по магазинам с учетом эффекта промо и клиентского состава."
+              : "Demand behavior diagnostics by store, with promo effect and customer mix context."}
+          </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">Last update: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
           <div className="preset-row">
             <button className="button ghost" type="button" onClick={() => applyPreset(30)}>
               30D
@@ -130,9 +145,9 @@ export default function StoreAnalytics() {
 
       <div className="panel">
         <div className="controls">
-          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label="Store" includeAllOption id="analytics-store" />
+          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label={locale === "ru" ? "Магазин" : "Store"} includeAllOption id="analytics-store" />
           <div className="field">
-            <label htmlFor="store-date-from">Date from</label>
+            <label htmlFor="store-date-from">{locale === "ru" ? "Дата с" : "Date from"}</label>
             <input
               id="store-date-from"
               className="input"
@@ -142,7 +157,7 @@ export default function StoreAnalytics() {
             />
           </div>
           <div className="field">
-            <label htmlFor="store-date-to">Date to</label>
+            <label htmlFor="store-date-to">{locale === "ru" ? "Дата по" : "Date to"}</label>
             <input
               id="store-date-to"
               className="input"
@@ -152,24 +167,24 @@ export default function StoreAnalytics() {
             />
           </div>
           <div className="field">
-            <label htmlFor="store-granularity">Granularity</label>
+            <label htmlFor="store-granularity">{locale === "ru" ? "Гранулярность" : "Granularity"}</label>
             <select
               id="store-granularity"
               className="select"
               value={granularity}
               onChange={(event) => setGranularity(event.target.value as "daily" | "monthly")}
             >
-              <option value="daily">Daily</option>
-              <option value="monthly">Monthly</option>
+              <option value="daily">{locale === "ru" ? "День" : "Daily"}</option>
+              <option value="monthly">{locale === "ru" ? "Месяц" : "Monthly"}</option>
             </select>
           </div>
           <button className="button primary" onClick={load} disabled={loading || invalidRange}>
-            {loading ? "Loading..." : "Refresh"}
+            {loading ? (locale === "ru" ? "Загрузка..." : "Loading...") : locale === "ru" ? "Обновить" : "Refresh"}
           </button>
         </div>
       </div>
 
-      {invalidRange && <p className="error">Date from cannot be greater than Date to.</p>}
+      {invalidRange && <p className="error">{locale === "ru" ? "Дата начала не может быть позже даты окончания." : "Date from cannot be greater than Date to."}</p>}
       {error && <p className="error">{error}</p>}
 
       {loading && series.length === 0 && (
@@ -181,47 +196,47 @@ export default function StoreAnalytics() {
       {summary && (
         <div className="insight-grid">
           <div className="insight-card">
-            <p className="insight-label">Total Sales</p>
+            <p className="insight-label">{locale === "ru" ? "Общие продажи" : "Total Sales"}</p>
             <p className="insight-value">{formatInt(summary.totalSales)}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">Avg Customers / Point</p>
+            <p className="insight-label">{locale === "ru" ? "Средние клиенты / точка" : "Avg Customers / Point"}</p>
             <p className="insight-value">{formatDecimal(summary.avgCustomers)}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">Sales per Customer</p>
+            <p className="insight-label">{locale === "ru" ? "Продажи на клиента" : "Sales per Customer"}</p>
             <p className="insight-value">{formatDecimal(summary.salesPerCustomer)}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">Promo Uplift</p>
+            <p className="insight-label">{locale === "ru" ? "Прирост от промо" : "Promo Uplift"}</p>
             <p className={`insight-value ${summary.uplift >= 0 ? "positive" : "negative"}`}>{formatPercent(summary.uplift)}</p>
           </div>
         </div>
       )}
 
       {chartData.length > 0 ? (
-        <SalesChart data={chartData} title="Sales and Customers Trend" showCustomers granularity={granularity} />
+        <SalesChart data={chartData} title={locale === "ru" ? "Тренд продаж и клиентов" : "Sales and Customers Trend"} showCustomers granularity={granularity} />
       ) : (
-        !loading && <p className="muted">No daily observations for current filters.</p>
+        !loading && <p className="muted">{locale === "ru" ? "Нет наблюдений за выбранный период." : "No daily observations for current filters."}</p>
       )}
 
       <div className="panel">
         <div className="panel-head">
-          <h3>Promo Impact</h3>
-          <p className="panel-subtitle">Average sales and customer mix split by promo status.</p>
+          <h3>{locale === "ru" ? "Эффект промо" : "Promo Impact"}</h3>
+          <p className="panel-subtitle">{locale === "ru" ? "Средние продажи и клиенты в разрезе статуса промо." : "Average sales and customer mix split by promo status."}</p>
         </div>
         {promoImpact.length === 0 ? (
-          <p className="muted">No promo effect rows returned by API.</p>
+          <p className="muted">{locale === "ru" ? "API не вернул строки по эффекту промо." : "No promo effect rows returned by API."}</p>
         ) : (
           <div className="table-wrap">
             <table className="table">
               <thead>
                 <tr>
-                  <th>Store</th>
-                  <th>Promo Status</th>
-                  <th>Avg Sales</th>
-                  <th>Avg Customers</th>
-                  <th>Days</th>
+                  <th>{locale === "ru" ? "Магазин" : "Store"}</th>
+                  <th>{locale === "ru" ? "Статус промо" : "Promo Status"}</th>
+                  <th>{locale === "ru" ? "Средние продажи" : "Avg Sales"}</th>
+                  <th>{locale === "ru" ? "Средние клиенты" : "Avg Customers"}</th>
+                  <th>{locale === "ru" ? "Дни" : "Days"}</th>
                 </tr>
               </thead>
               <tbody>
@@ -233,9 +248,9 @@ export default function StoreAnalytics() {
                         {row.promo_flag}
                       </span>
                     </td>
-                    <td>{row.avg_sales.toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
-                    <td>{row.avg_customers.toLocaleString("en-US", { maximumFractionDigits: 2 })}</td>
-                    <td>{row.num_days.toLocaleString("en-US")}</td>
+                    <td>{row.avg_sales.toLocaleString(localeTag, { maximumFractionDigits: 2 })}</td>
+                    <td>{row.avg_customers.toLocaleString(localeTag, { maximumFractionDigits: 2 })}</td>
+                    <td>{row.num_days.toLocaleString(localeTag)}</td>
                   </tr>
                 ))}
               </tbody>

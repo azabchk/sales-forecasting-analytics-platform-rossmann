@@ -1,0 +1,151 @@
+contract_version: v1
+format: csv
+limits:
+  max_rows: 2000000
+  max_file_size_mb: 200
+rules:
+  allow_extra_columns: true
+  strict_types: false
+  drop_unknown_columns: false
+  null_on_coercion_error: true
+profiles:
+  rossmann_train:
+    description: Rossmann daily sales export for ETL demo
+    canonical_order:
+      - store_id
+      - day_of_week
+      - full_date
+      - sales
+      - customers
+      - open
+      - promo
+      - state_holiday
+      - school_holiday
+    columns:
+      - canonical_name: store_id
+        required: true
+        dtype: int
+        aliases: [Store, store, storeid]
+      - canonical_name: day_of_week
+        required: true
+        dtype: int
+        aliases: [DayOfWeek, dayofweek]
+      - canonical_name: full_date
+        required: true
+        dtype: date
+        aliases: [Date, date]
+      - canonical_name: sales
+        required: true
+        dtype: float
+        aliases: [Sales, sale]
+      - canonical_name: customers
+        required: false
+        dtype: float
+        aliases: [Customers, customer_count]
+      - canonical_name: open
+        required: false
+        dtype: int
+        aliases: [Open, is_open]
+      - canonical_name: promo
+        required: false
+        dtype: int
+        aliases: [Promo, promotion]
+      - canonical_name: state_holiday
+        required: false
+        dtype: string
+        aliases: [StateHoliday, stateholiday]
+      - canonical_name: school_holiday
+        required: false
+        dtype: int
+        aliases: [SchoolHoliday, schoolholiday]
+    quality_rules:
+      columns:
+        - id: sales_non_negative
+          column: sales
+          type: between
+          min_value: 0
+          severity: FAIL
+        - id: day_of_week_allowed
+          column: day_of_week
+          type: accepted_values
+          values: [1, 2, 3, 4, 5, 6, 7]
+          severity: FAIL
+        - id: customers_null_ratio
+          column: customers
+          type: max_null_ratio
+          value: 0.10
+          severity: WARN
+      table:
+        - id: train_pk_unique
+          type: composite_unique
+          columns: [store_id, full_date]
+          severity: FAIL
+        - id: row_count_min
+          type: row_count_between
+          min_value: 1
+          severity: FAIL
+
+  rossmann_store:
+    description: Rossmann store metadata export for ETL demo
+    canonical_order:
+      - store_id
+      - store_type
+      - assortment
+      - competition_distance
+      - competition_open_since_month
+      - competition_open_since_year
+      - promo2
+      - promo2_since_week
+      - promo2_since_year
+      - promo_interval
+    columns:
+      - canonical_name: store_id
+        required: true
+        dtype: int
+        aliases: [Store, store, storeid]
+      - canonical_name: store_type
+        required: false
+        dtype: string
+        aliases: [StoreType, storetype]
+      - canonical_name: assortment
+        required: false
+        dtype: string
+        aliases: [Assortment]
+      - canonical_name: competition_distance
+        required: false
+        dtype: float
+        aliases: [CompetitionDistance, competitiondistance]
+      - canonical_name: competition_open_since_month
+        required: false
+        dtype: int
+        aliases: [CompetitionOpenSinceMonth, competitionopensincemonth]
+      - canonical_name: competition_open_since_year
+        required: false
+        dtype: int
+        aliases: [CompetitionOpenSinceYear, competitionopensinceyear]
+      - canonical_name: promo2
+        required: false
+        dtype: int
+        aliases: [Promo2]
+      - canonical_name: promo2_since_week
+        required: false
+        dtype: int
+        aliases: [Promo2SinceWeek, promo2sinceweek]
+      - canonical_name: promo2_since_year
+        required: false
+        dtype: int
+        aliases: [Promo2SinceYear, promo2sinceyear]
+      - canonical_name: promo_interval
+        required: false
+        dtype: string
+        aliases: [PromoInterval, promointerval]
+    quality_rules:
+      table:
+        - id: store_pk_unique
+          type: composite_unique
+          columns: [store_id]
+          severity: FAIL
+        - id: row_count_min
+          type: row_count_between
+          min_value: 1
+          severity: FAIL

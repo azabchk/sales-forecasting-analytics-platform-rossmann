@@ -6,6 +6,7 @@ import { fetchStores, ForecastPoint, postForecast, Store } from "../api/endpoint
 import ForecastChart from "../components/ForecastChart";
 import LoadingBlock from "../components/LoadingBlock";
 import StoreSelector from "../components/StoreSelector";
+import { useI18n } from "../lib/i18n";
 import { formatDecimal, formatInt } from "../lib/format";
 
 function summarizeForecast(rows: ForecastPoint[]) {
@@ -41,6 +42,7 @@ function summarizeForecast(rows: ForecastPoint[]) {
 }
 
 export default function ForecastPage() {
+  const { locale, localeTag } = useI18n();
   const [stores, setStores] = useState<Store[]>([]);
   const [storeId, setStoreId] = useState<number | undefined>(undefined);
   const [horizon, setHorizon] = useState<number>(30);
@@ -57,12 +59,16 @@ export default function ForecastPage() {
           setStoreId(rows[0].store_id);
         }
       })
-      .catch((errorResponse) => setError(extractApiError(errorResponse, "Failed to load stores list.")));
-  }, []);
+      .catch((errorResponse) =>
+        setError(
+          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
+        )
+      );
+  }, [locale]);
 
   async function generateForecast() {
     if (!storeId) {
-      setError("Select a store to run forecast.");
+      setError(locale === "ru" ? "Выберите магазин для запуска прогноза." : "Select a store to run forecast.");
       return;
     }
 
@@ -71,9 +77,16 @@ export default function ForecastPage() {
     try {
       const result = await postForecast({ store_id: storeId, horizon_days: horizon });
       setData(result);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
-      setError(extractApiError(errorResponse, "Unable to generate forecast. Ensure backend and trained model are available."));
+      setError(
+        extractApiError(
+          errorResponse,
+          locale === "ru"
+            ? "Не удалось сформировать прогноз. Проверьте backend и обученную модель."
+            : "Unable to generate forecast. Ensure backend and trained model are available."
+        )
+      );
     } finally {
       setLoading(false);
     }
@@ -112,22 +125,26 @@ export default function ForecastPage() {
     <section className="page">
       <div className="page-head">
         <div>
-          <h2 className="page-title">Forecast Studio</h2>
-          <p className="page-note">Recursive multi-day forecasting with confidence bands and export-ready outputs.</p>
+          <h2 className="page-title">{locale === "ru" ? "Студия прогноза" : "Forecast Studio"}</h2>
           <p className="page-note">
-            Need model diagnostics? Open{" "}
+            {locale === "ru"
+              ? "Рекурсивный многодневный прогноз с доверительными интервалами и экспортом."
+              : "Recursive multi-day forecasting with confidence bands and export-ready outputs."}
+          </p>
+          <p className="page-note">
+            {locale === "ru" ? "Нужна диагностика модели? Откройте " : "Need model diagnostics? Open "}
             <Link to="/model-intelligence" className="inline-link">
-              Model Intelligence
+              {locale === "ru" ? "Интеллект модели" : "Model Intelligence"}
             </Link>
-            . Need planning simulation? Open{" "}
+            {locale === "ru" ? ". Нужна симуляция планирования? Откройте " : ". Need planning simulation? Open "}
             <Link to="/scenario-lab" className="inline-link">
-              Scenario Lab
+              {locale === "ru" ? "Сценарии" : "Scenario Lab"}
             </Link>
             .
           </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">Last update: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
           <div className="preset-row">
             <button type="button" className="button ghost" onClick={() => setHorizonPreset(7)}>
               7D
@@ -148,12 +165,12 @@ export default function ForecastPage() {
             stores={stores}
             value={storeId}
             onChange={setStoreId}
-            label="Store"
+            label={locale === "ru" ? "Магазин" : "Store"}
             includeAllOption={false}
             id="forecast-store"
           />
           <div className="field">
-            <label htmlFor="forecast-horizon">Horizon (days)</label>
+            <label htmlFor="forecast-horizon">{locale === "ru" ? "Горизонт (дни)" : "Horizon (days)"}</label>
             <input
               id="forecast-horizon"
               className="input"
@@ -165,10 +182,10 @@ export default function ForecastPage() {
             />
           </div>
           <button onClick={generateForecast} className="button primary" disabled={loading || !storeId}>
-            {loading ? "Running..." : "Generate forecast"}
+            {loading ? (locale === "ru" ? "Выполняется..." : "Running...") : locale === "ru" ? "Сформировать прогноз" : "Generate forecast"}
           </button>
           <button onClick={downloadForecastCsv} className="button" type="button" disabled={data.length === 0}>
-            Download CSV
+            {locale === "ru" ? "Скачать CSV" : "Download CSV"}
           </button>
         </div>
       </div>
@@ -185,40 +202,40 @@ export default function ForecastPage() {
         <>
           <div className="forecast-summary">
             <div className="summary-box">
-              <p className="label">Total forecast</p>
+              <p className="label">{locale === "ru" ? "Суммарный прогноз" : "Total forecast"}</p>
               <p className="value">{formatInt(summary.total)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Average per day</p>
+              <p className="label">{locale === "ru" ? "Среднее в день" : "Average per day"}</p>
               <p className="value">{formatDecimal(summary.avg)}</p>
             </div>
             <div className="summary-box">
-              <p className="label">Peak day</p>
+              <p className="label">{locale === "ru" ? "Пиковый день" : "Peak day"}</p>
               <p className="value">
                 {formatInt(summary.peak)} ({summary.peakDate})
               </p>
             </div>
             <div className="summary-box">
-              <p className="label">Avg interval width</p>
+              <p className="label">{locale === "ru" ? "Средняя ширина интервала" : "Avg interval width"}</p>
               <p className="value">
-                {summary.avgBandWidth > 0 ? formatDecimal(summary.avgBandWidth) : "N/A"}
+                {summary.avgBandWidth > 0 ? formatDecimal(summary.avgBandWidth) : locale === "ru" ? "Н/Д" : "N/A"}
               </p>
             </div>
           </div>
           <ForecastChart data={data} />
           <div className="panel">
             <div className="panel-head">
-              <h3>First 14 Forecast Rows</h3>
-              <p className="panel-subtitle">Operational preview for immediate planning decisions.</p>
+              <h3>{locale === "ru" ? "Первые 14 строк прогноза" : "First 14 Forecast Rows"}</h3>
+              <p className="panel-subtitle">{locale === "ru" ? "Операционный предпросмотр для быстрых решений." : "Operational preview for immediate planning decisions."}</p>
             </div>
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Date</th>
-                    <th>Predicted Sales</th>
-                    <th>Lower Band</th>
-                    <th>Upper Band</th>
+                    <th>{locale === "ru" ? "Дата" : "Date"}</th>
+                    <th>{locale === "ru" ? "Прогноз продаж" : "Predicted Sales"}</th>
+                    <th>{locale === "ru" ? "Нижняя граница" : "Lower Band"}</th>
+                    <th>{locale === "ru" ? "Верхняя граница" : "Upper Band"}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -238,7 +255,7 @@ export default function ForecastPage() {
       )}
 
       {!loading && data.length === 0 && !error && (
-        <p className="muted">Select forecast settings and run the model to display results.</p>
+        <p className="muted">{locale === "ru" ? "Выберите параметры прогноза и запустите модель." : "Select forecast settings and run the model to display results."}</p>
       )}
     </section>
   );

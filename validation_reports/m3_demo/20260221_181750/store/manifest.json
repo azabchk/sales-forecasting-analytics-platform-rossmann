@@ -1,0 +1,86 @@
+{
+  "source_file_name": "rossmann_store_valid.csv",
+  "contract_version": "v1",
+  "profile": "rossmann_store",
+  "validation_status": "PASS",
+  "renamed_columns": {
+    "Store": "store_id",
+    "StoreType": "store_type",
+    "Assortment": "assortment",
+    "CompetitionDistance": "competition_distance",
+    "CompetitionOpenSinceMonth": "competition_open_since_month",
+    "CompetitionOpenSinceYear": "competition_open_since_year",
+    "Promo2": "promo2",
+    "Promo2SinceWeek": "promo2_since_week",
+    "Promo2SinceYear": "promo2_since_year",
+    "PromoInterval": "promo_interval"
+  },
+  "extra_columns_dropped": [],
+  "coercion_stats": {
+    "store_id": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "store_type": {
+      "expected_dtype": "string",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "assortment": {
+      "expected_dtype": "string",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "competition_distance": {
+      "expected_dtype": "float",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "competition_open_since_month": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "competition_open_since_year": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo2": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo2_since_week": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo2_since_year": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo_interval": {
+      "expected_dtype": "string",
+      "invalid_to_null": 0,
+      "null_count_after": 1
+    }
+  },
+  "output_row_count": 2,
+  "output_column_count": 10,
+  "final_canonical_columns": [
+    "store_id",
+    "store_type",
+    "assortment",
+    "competition_distance",
+    "competition_open_since_month",
+    "competition_open_since_year",
+    "promo2",
+    "promo2_since_week",
+    "promo2_since_year",
+    "promo_interval"
+  ],
+  "retained_extra_columns": []
+}

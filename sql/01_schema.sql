@@ -43,3 +43,22 @@ CREATE TABLE IF NOT EXISTS fact_sales_daily (
     CONSTRAINT uq_fact_store_date UNIQUE (store_id, date_id),
     CONSTRAINT chk_sales_non_negative CHECK (sales >= 0)
 );
+
+CREATE TABLE IF NOT EXISTS preflight_run_registry (
+    run_id VARCHAR(64) NOT NULL,
+    source_name VARCHAR(16) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    mode VARCHAR(32) NOT NULL,
+    validation_status VARCHAR(32) NOT NULL,
+    semantic_status VARCHAR(32) NOT NULL,
+    final_status VARCHAR(32) NOT NULL,
+    used_input_path TEXT NOT NULL,
+    used_unified BOOLEAN NOT NULL,
+    artifact_dir TEXT,
+    validation_report_path TEXT,
+    manifest_path TEXT,
+    summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    blocked BOOLEAN NOT NULL,
+    block_reason TEXT,
+    CONSTRAINT pk_preflight_run_registry PRIMARY KEY (run_id, source_name)
+);

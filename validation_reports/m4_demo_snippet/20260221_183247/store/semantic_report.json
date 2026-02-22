@@ -1,0 +1,42 @@
+{
+  "status": "PASS",
+  "summary": "All semantic quality rules passed.",
+  "counts": {
+    "total": 2,
+    "passed": 2,
+    "warned": 0,
+    "failed": 0
+  },
+  "rules": [
+    {
+      "rule_id": "store_pk_unique",
+      "rule_type": "composite_unique",
+      "target": [
+        "store_id"
+      ],
+      "severity": "FAIL",
+      "status": "PASS",
+      "observed": {
+        "row_count": 2,
+        "columns": [
+          "store_id"
+        ],
+        "duplicate_row_count": 0
+      },
+      "message": "Composite key ['store_id'] is unique."
+    },
+    {
+      "rule_id": "row_count_min",
+      "rule_type": "row_count_between",
+      "target": [],
+      "severity": "FAIL",
+      "status": "PASS",
+      "observed": {
+        "row_count": 2,
+        "min_allowed": 1,
+        "max_allowed": null
+      },
+      "message": "Row count is within configured bounds."
+    }
+  ]
+}

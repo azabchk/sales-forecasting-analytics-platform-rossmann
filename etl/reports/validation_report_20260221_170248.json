@@ -1,0 +1,143 @@
+{
+  "status": "PASS",
+  "errors": [],
+  "warnings": [],
+  "files": {
+    "train": {
+      "file_key": "train",
+      "path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/data/train.csv",
+      "profile": "rossmann_train",
+      "encoding": "utf-8",
+      "mime_hint": "text/csv",
+      "size_bytes": 38057952,
+      "rows": 1017209,
+      "columns": 9,
+      "column_names": [
+        "store_id",
+        "day_of_week",
+        "full_date",
+        "sales",
+        "customers",
+        "open",
+        "promo",
+        "state_holiday",
+        "school_holiday"
+      ]
+    },
+    "store": {
+      "file_key": "store",
+      "path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/data/store.csv",
+      "profile": "rossmann_store",
+      "encoding": "utf-8",
+      "mime_hint": "text/csv",
+      "size_bytes": 45010,
+      "rows": 1115,
+      "columns": 10,
+      "column_names": [
+        "store_id",
+        "store_type",
+        "assortment",
+        "competition_distance",
+        "competition_open_since_month",
+        "competition_open_since_year",
+        "promo2",
+        "promo2_since_week",
+        "promo2_since_year",
+        "promo_interval"
+      ]
+    }
+  },
+  "coercion_summary": {
+    "train": {
+      "store_id": 0,
+      "day_of_week": 0,
+      "full_date": 0,
+      "sales": 0,
+      "customers": 0,
+      "open": 0,
+      "promo": 0,
+      "state_holiday": 0,
+      "school_holiday": 0
+    },
+    "store": {
+      "store_id": 0,
+      "store_type": 0,
+      "assortment": 0,
+      "competition_distance": 0,
+      "competition_open_since_month": 0,
+      "competition_open_since_year": 0,
+      "promo2": 0,
+      "promo2_since_week": 0,
+      "promo2_since_year": 0,
+      "promo_interval": 0
+    }
+  },
+  "duplicates_summary": {
+    "train": {
+      "policy": "warn",
+      "subset": [
+        "store_id",
+        "full_date"
+      ],
+      "duplicates_detected": 0,
+      "rows_after_policy": 1017209
+    },
+    "store": {
+      "policy": "warn",
+      "subset": [
+        "store_id"
+      ],
+      "duplicates_detected": 0,
+      "rows_after_policy": 1115
+    }
+  },
+  "null_summary": {
+    "train": {
+      "required_columns": {
+        "day_of_week": {
+          "null_count": 0,
+          "null_ratio": 0.0
+        },
+        "full_date": {
+          "null_count": 0,
+          "null_ratio": 0.0
+        },
+        "sales": {
+          "null_count": 0,
+          "null_ratio": 0.0
+        },
+        "store_id": {
+          "null_count": 0,
+          "null_ratio": 0.0
+        }
+      }
+    },
+    "store": {
+      "required_columns": {
+        "store_id": {
+          "null_count": 0,
+          "null_ratio": 0.0
+        }
+      }
+    }
+  },
+  "schema_mapping_used": {
+    "train": {
+      "Store": "store_id",
+      "DayOfWeek": "day_of_week",
+      "Date": "full_date",
+      "StateHoliday": "state_holiday",
+      "SchoolHoliday": "school_holiday"
+    },
+    "store": {
+      "Store": "store_id",
+      "StoreType": "store_type",
+      "CompetitionDistance": "competition_distance",
+      "CompetitionOpenSinceMonth": "competition_open_since_month",
+      "CompetitionOpenSinceYear": "competition_open_since_year",
+      "Promo2SinceWeek": "promo2_since_week",
+      "Promo2SinceYear": "promo2_since_year",
+      "PromoInterval": "promo_interval"
+    }
+  }
+}

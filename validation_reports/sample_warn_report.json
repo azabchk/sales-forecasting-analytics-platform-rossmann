@@ -1,0 +1,55 @@
+{
+  "status": "WARN",
+  "contract_version": "v1",
+  "file_name": "rossmann_train_extra_columns.csv",
+  "file_path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/tests/fixtures/input_samples/rossmann_train_extra_columns.csv",
+  "profile": "rossmann_train",
+  "checks": {
+    "format": "PASS",
+    "file_size": "PASS",
+    "row_limit": "PASS",
+    "required_columns": "PASS",
+    "types": "PASS",
+    "extra_columns": "WARN"
+  },
+  "errors": [],
+  "warnings": [
+    "Extra columns detected: ['CustomMetric']"
+  ],
+  "summary": "Validation completed with warnings.",
+  "metadata": {
+    "format": "csv",
+    "encoding": "utf-8",
+    "rows": 1,
+    "file_size_bytes": 126,
+    "max_rows": 2000000,
+    "max_file_size_mb": 200.0,
+    "allow_extra_columns": true,
+    "strict_types": false,
+    "mapped_columns": [
+      "customers",
+      "day_of_week",
+      "full_date",
+      "open",
+      "promo",
+      "sales",
+      "school_holiday",
+      "state_holiday",
+      "store_id"
+    ],
+    "extra_columns": [
+      "CustomMetric"
+    ],
+    "type_mismatches": {
+      "store_id": 0,
+      "day_of_week": 0,
+      "full_date": 0,
+      "sales": 0,
+      "customers": 0,
+      "open": 0,
+      "promo": 0,
+      "state_holiday": 0,
+      "school_holiday": 0
+    }
+  }
+}

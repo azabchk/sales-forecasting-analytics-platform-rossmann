@@ -1,7 +1,14 @@
 ﻿from fastapi import APIRouter, HTTPException
 
-from app.schemas import ForecastPoint, ForecastRequest, ForecastScenarioRequest, ForecastScenarioResponse
-from app.services.forecast_service import forecast_for_store, forecast_scenario_for_store
+from app.schemas import (
+    ForecastBatchRequest,
+    ForecastBatchResponse,
+    ForecastPoint,
+    ForecastRequest,
+    ForecastScenarioRequest,
+    ForecastScenarioResponse,
+)
+from app.services.forecast_service import forecast_batch_for_stores, forecast_for_store, forecast_scenario_for_store
 
 router = APIRouter()
 
@@ -37,3 +44,16 @@ def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenari
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Scenario forecast error: {exc}") from exc
+
+
+@router.post("/forecast/batch", response_model=ForecastBatchResponse)
+def forecast_sales_batch(payload: ForecastBatchRequest) -> ForecastBatchResponse:
+    try:
+        result = forecast_batch_for_stores(store_ids=payload.store_ids, horizon_days=payload.horizon_days)
+        return ForecastBatchResponse.model_validate(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Batch forecast error: {exc}") from exc

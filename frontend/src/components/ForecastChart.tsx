@@ -1,6 +1,7 @@
 import React from "react";
 import { Area, AreaChart, CartesianGrid, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
+import { useI18n } from "../lib/i18n";
 import { formatCompact, formatDateLabel, formatInt } from "../lib/format";
 
 type ForecastPoint = {
@@ -19,10 +20,12 @@ function ForecastTooltip({
   active,
   label,
   payload,
+  locale,
 }: {
   active?: boolean;
   label?: string;
   payload?: TooltipRow[];
+  locale: "en" | "ru";
 }) {
   if (!active || !payload || !label) {
     return null;
@@ -35,10 +38,10 @@ function ForecastTooltip({
   return (
     <div className="chart-tooltip">
       <p className="chart-tooltip-title">{formatDateLabel(label)}</p>
-      <p className="chart-tooltip-line">Predicted: {formatInt(predicted)}</p>
+      <p className="chart-tooltip-line">{locale === "ru" ? "Прогноз" : "Predicted"}: {formatInt(predicted)}</p>
       {typeof lower === "number" && typeof upper === "number" && (
         <p className="chart-tooltip-line">
-          Band: {formatInt(lower)} to {formatInt(upper)}
+          {locale === "ru" ? "Диапазон" : "Band"}: {formatInt(lower)} {locale === "ru" ? "до" : "to"} {formatInt(upper)}
         </p>
       )}
     </div>
@@ -46,28 +49,31 @@ function ForecastTooltip({
 }
 
 export default function ForecastChart({ data }: { data: ForecastPoint[] }) {
+  const { locale } = useI18n();
   const total = data.reduce((acc, row) => acc + row.predicted_sales, 0);
 
   return (
     <div className="panel">
       <div className="panel-head">
-        <h3>Forecast Horizon</h3>
-        <p className="panel-subtitle">{formatCompact(total)} projected across selected horizon</p>
+        <h3>{locale === "ru" ? "Горизонт прогноза" : "Forecast Horizon"}</h3>
+        <p className="panel-subtitle">
+          {formatCompact(total)} {locale === "ru" ? "прогноз на выбранном горизонте" : "projected across selected horizon"}
+        </p>
       </div>
       <div style={{ width: "100%", height: 360 }}>
         <ResponsiveContainer>
           <AreaChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="intervalGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#0f7661" stopOpacity={0.24} />
-                <stop offset="100%" stopColor="#0f7661" stopOpacity={0.02} />
+                <stop offset="0%" stopColor="var(--chart-primary)" stopOpacity={0.24} />
+                <stop offset="100%" stopColor="var(--chart-primary)" stopOpacity={0.02} />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" stroke="#dfe9e4" />
-            <XAxis dataKey="date" minTickGap={26} stroke="#53736a" tickFormatter={formatDateLabel} />
-            <YAxis stroke="#53736a" tickFormatter={(value) => formatCompact(Number(value))} />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+            <XAxis dataKey="date" minTickGap={26} stroke="var(--chart-axis)" tickFormatter={formatDateLabel} />
+            <YAxis stroke="var(--chart-axis)" tickFormatter={(value) => formatCompact(Number(value))} />
             <Tooltip
-              content={<ForecastTooltip />}
+              content={<ForecastTooltip locale={locale} />}
               wrapperStyle={{ outline: "none" }}
             />
             <Legend />
@@ -75,29 +81,29 @@ export default function ForecastChart({ data }: { data: ForecastPoint[] }) {
             <Line
               type="monotone"
               dataKey="predicted_sales"
-              stroke="#0b5f4f"
+              stroke="var(--chart-primary)"
               strokeWidth={2.6}
               dot={false}
               activeDot={{ r: 4 }}
-              name="Predicted sales"
+              name={locale === "ru" ? "Прогноз продаж" : "Predicted sales"}
             />
             <Line
               type="monotone"
               dataKey="predicted_lower"
-              stroke="#3a8f7b"
+              stroke="var(--chart-tertiary)"
               strokeWidth={1.6}
               strokeDasharray="5 4"
               dot={false}
-              name="Lower interval"
+              name={locale === "ru" ? "Нижний интервал" : "Lower interval"}
             />
             <Line
               type="monotone"
               dataKey="predicted_upper"
-              stroke="#3a8f7b"
+              stroke="var(--chart-tertiary)"
               strokeWidth={1.6}
               strokeDasharray="5 4"
               dot={false}
-              name="Upper interval"
+              name={locale === "ru" ? "Верхний интервал" : "Upper interval"}
             />
           </AreaChart>
         </ResponsiveContainer>

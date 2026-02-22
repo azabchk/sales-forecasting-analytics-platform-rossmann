@@ -1,0 +1,3 @@
+storeid,dayofweek,date,sale,Customers,is_open,promotion,stateholiday,schoolholiday,ExtraField
+1,3,2015-07-01,5263,555,1,1,0,1,alpha
+2,bad,invalid-date,not-a-number,625,yes,0,0,0,beta

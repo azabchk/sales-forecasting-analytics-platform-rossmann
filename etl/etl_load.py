@@ -2,7 +2,9 @@
 
 import argparse
 import os
+import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -10,6 +12,14 @@ import sqlalchemy as sa
 import yaml
 from dotenv import load_dotenv
 from psycopg2.extras import execute_values
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.etl.preflight_runner import PreflightEnforcementError, PreflightResult, run_preflight
+
+SUPPORTED_PREFLIGHT_MODES = {"off", "report_only", "enforce"}
 
 
 @dataclass
@@ -19,12 +29,32 @@ class ETLConfig:
     db_url: str
     truncate_reload: bool
     chunksize: int
+    preflight_mode: str
+    preflight_profile_train: str
+    preflight_profile_store: str
+    preflight_contract_path: str
+    preflight_artifact_dir: str
 
 
-def load_config(path: str) -> ETLConfig:
+def _resolve_path(value: str, base_dir: Path) -> str:
+    path = Path(value)
+    if path.is_absolute():
+        return str(path.resolve())
+    return str((base_dir / path).resolve())
+
+
+def _resolve_preflight_mode(mode: str) -> str:
+    normalized = str(mode).strip().lower()
+    if normalized not in SUPPORTED_PREFLIGHT_MODES:
+        raise ValueError(f"Unsupported preflight mode '{mode}'. Expected one of {sorted(SUPPORTED_PREFLIGHT_MODES)}")
+    return normalized
+
+
+def load_config(path: str, cli_overrides: dict[str, str | None] | None = None) -> ETLConfig:
     config_path = Path(path).resolve()
     project_root = config_path.parents[1]
     load_dotenv(dotenv_path=project_root / ".env", override=False)
+    overrides = cli_overrides or {}
 
     with open(config_path, "r", encoding="utf-8") as file:
         cfg = yaml.safe_load(file)
@@ -33,12 +63,63 @@ def load_config(path: str) -> ETLConfig:
     if not db_url:
         raise ValueError("DATABASE_URL is not set in environment or .env")
 
+    preflight_cfg = cfg.get("preflight", {})
+    if not isinstance(preflight_cfg, dict):
+        preflight_cfg = {}
+
+    cfg_profile_mapping = preflight_cfg.get("profile_mapping", {})
+    if not isinstance(cfg_profile_mapping, dict):
+        cfg_profile_mapping = {}
+
+    profile_fallback = (
+        overrides.get("preflight_profile")
+        or os.getenv("PREFLIGHT_PROFILE")
+        or str(preflight_cfg.get("profile", "")).strip()
+        or None
+    )
+    preflight_profile_train = (
+        overrides.get("preflight_profile_train")
+        or os.getenv("PREFLIGHT_PROFILE_TRAIN")
+        or profile_fallback
+        or str(cfg_profile_mapping.get("train", "rossmann_train"))
+    )
+    preflight_profile_store = (
+        overrides.get("preflight_profile_store")
+        or os.getenv("PREFLIGHT_PROFILE_STORE")
+        or profile_fallback
+        or str(cfg_profile_mapping.get("store", "rossmann_store"))
+    )
+
+    mode_value = overrides.get("preflight_mode") or os.getenv("PREFLIGHT_MODE") or str(preflight_cfg.get("mode", "off"))
+    preflight_mode = _resolve_preflight_mode(mode_value)
+
+    contract_from_cfg = str(preflight_cfg.get("contract_path", "../config/input_contract/contract_v1.yaml"))
+    contract_from_override = overrides.get("preflight_contract") or os.getenv("PREFLIGHT_CONTRACT_PATH")
+    preflight_contract_path = (
+        _resolve_path(contract_from_override, project_root)
+        if contract_from_override
+        else _resolve_path(contract_from_cfg, config_path.parent)
+    )
+
+    artifacts_from_cfg = str(preflight_cfg.get("artifact_dir", "reports/preflight"))
+    artifacts_from_override = overrides.get("preflight_artifact_dir") or os.getenv("PREFLIGHT_ARTIFACT_DIR")
+    preflight_artifact_dir = (
+        _resolve_path(artifacts_from_override, project_root)
+        if artifacts_from_override
+        else _resolve_path(artifacts_from_cfg, config_path.parent)
+    )
+
     return ETLConfig(
         train_csv=str((config_path.parent / cfg["paths"]["train_csv"]).resolve()),
         store_csv=str((config_path.parent / cfg["paths"]["store_csv"]).resolve()),
         db_url=db_url,
         truncate_reload=bool(cfg["etl"].get("truncate_reload", True)),
         chunksize=int(cfg["etl"].get("chunksize", 50000)),
+        preflight_mode=preflight_mode,
+        preflight_profile_train=preflight_profile_train,
+        preflight_profile_store=preflight_profile_store,
+        preflight_contract_path=preflight_contract_path,
+        preflight_artifact_dir=preflight_artifact_dir,
     )
 
 
@@ -216,9 +297,78 @@ def insert_dataframe(
         execute_values(cursor, query, rows, page_size=page_size)
 
 
+def run_preflight_hook(cfg: ETLConfig) -> tuple[str, str, dict[str, PreflightResult]]:
+    if cfg.preflight_mode == "off":
+        print("[ETL][Preflight] mode=off -> using raw inputs")
+        return cfg.train_csv, cfg.store_csv, {}
+
+    run_id = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    print(f"[ETL][Preflight] mode={cfg.preflight_mode} run_id={run_id}")
+
+    results: dict[str, PreflightResult] = {}
+    items = [
+        ("train", cfg.train_csv, cfg.preflight_profile_train),
+        ("store", cfg.store_csv, cfg.preflight_profile_store),
+    ]
+
+    for source_name, source_path, profile_name in items:
+        print(f"[ETL][Preflight][{source_name}] validating '{source_path}' with profile '{profile_name}'")
+        try:
+            result = run_preflight(
+                raw_input_path=source_path,
+                profile_name=profile_name,
+                contract_path=cfg.preflight_contract_path,
+                mode=cfg.preflight_mode,
+                artifact_root=cfg.preflight_artifact_dir,
+                source_name=source_name,
+                run_id=run_id,
+            )
+        except PreflightEnforcementError as exc:
+            result = exc.result
+            print(
+                f"[ETL][Preflight][{source_name}] status="
+                f"validation={result.validation_status}, semantic={result.semantic_status} (blocked in enforce mode)"
+            )
+            if result.validation_report_path:
+                print(f"[ETL][Preflight][{source_name}] validation report: {result.validation_report_path}")
+            if result.semantic_report_path:
+                print(f"[ETL][Preflight][{source_name}] semantic report: {result.semantic_report_path}")
+            if result.semantic_summary:
+                print(result.semantic_summary)
+            raise ValueError(
+                f"Preflight blocked ETL for '{source_name}'. "
+                f"Fix input errors or switch mode to report_only/off. "
+                f"Validation report: {result.validation_report_path}; "
+                f"Semantic report: {result.semantic_report_path}"
+            ) from exc
+
+        results[source_name] = result
+        print(
+            f"[ETL][Preflight][{source_name}] status="
+            f"validation={result.validation_status}, semantic={result.semantic_status}"
+        )
+        if result.validation_report_path:
+            print(f"[ETL][Preflight][{source_name}] validation report: {result.validation_report_path}")
+        if result.semantic_report_path:
+            print(f"[ETL][Preflight][{source_name}] semantic report: {result.semantic_report_path}")
+        if result.semantic_summary:
+            print(result.semantic_summary)
+        if result.unification_manifest_path:
+            print(f"[ETL][Preflight][{source_name}] unification manifest: {result.unification_manifest_path}")
+        if result.preflight_report_path:
+            print(f"[ETL][Preflight][{source_name}] preflight report: {result.preflight_report_path}")
+        if result.mode == "enforce":
+            print(f"[ETL][Preflight][{source_name}] ETL input switched to unified: {result.etl_input_path}")
+        else:
+            print(f"[ETL][Preflight][{source_name}] ETL input remains raw: {result.etl_input_path}")
+
+    return results["train"].etl_input_path, results["store"].etl_input_path, results
+
+
 def run_etl(cfg: ETLConfig) -> None:
     print("[ETL] Loading source data...")
-    train_raw, store_raw = load_raw_data(cfg.train_csv, cfg.store_csv)
+    train_input, store_input, _ = run_preflight_hook(cfg)
+    train_raw, store_raw = load_raw_data(train_input, store_input)
 
     print("[ETL] Cleaning and preparing datasets...")
     dim_store = clean_store(store_raw)
@@ -322,9 +472,30 @@ def run_etl(cfg: ETLConfig) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="ETL: load Rossmann dataset into PostgreSQL")
     parser.add_argument("--config", required=True, help="Path to YAML config")
+    parser.add_argument(
+        "--preflight-mode",
+        choices=sorted(SUPPORTED_PREFLIGHT_MODES),
+        default=None,
+        help="Preflight mode override: off | report_only | enforce",
+    )
+    parser.add_argument("--preflight-profile", default=None, help="Preflight profile override for both train/store")
+    parser.add_argument("--preflight-profile-train", default=None, help="Preflight profile override for train input")
+    parser.add_argument("--preflight-profile-store", default=None, help="Preflight profile override for store input")
+    parser.add_argument("--preflight-contract", default=None, help="Path to input contract YAML")
+    parser.add_argument("--preflight-artifact-dir", default=None, help="Directory root for preflight artifacts")
     args = parser.parse_args()
 
-    cfg = load_config(args.config)
+    cfg = load_config(
+        args.config,
+        cli_overrides={
+            "preflight_mode": args.preflight_mode,
+            "preflight_profile": args.preflight_profile,
+            "preflight_profile_train": args.preflight_profile_train,
+            "preflight_profile_store": args.preflight_profile_store,
+            "preflight_contract": args.preflight_contract,
+            "preflight_artifact_dir": args.preflight_artifact_dir,
+        },
+    )
     run_etl(cfg)
 
 

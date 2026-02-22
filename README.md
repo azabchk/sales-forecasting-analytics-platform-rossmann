@@ -7,7 +7,7 @@ End-to-end platform for store-level analytics and demand forecasting:
 - FastAPI backend (`/api/v1`)
 - React dashboard
 
-## Version 3 Highlights
+## Version 2.0.0 Highlights
 
 - Professional multi-page dashboard:
   - Executive Overview
@@ -20,7 +20,7 @@ End-to-end platform for store-level analytics and demand forecasting:
   - confidence summary cards
   - first-14-row preview table
   - one-click CSV export
-- Scenario Lab (V3):
+- Scenario Lab:
   - baseline vs scenario simulation
   - promo strategy modes (`as_is`, `always_on`, `weekends_only`, `off`)
   - weekend open/close and school-holiday toggles
@@ -37,10 +37,15 @@ End-to-end platform for store-level analytics and demand forecasting:
   - `GET /api/v1/model/metadata`
 - New forecasting scenario API:
   - `POST /api/v1/forecast/scenario`
+- New portfolio forecasting API:
+  - `POST /api/v1/forecast/batch`
+- New frontend planning module:
+  - Portfolio Planner page for multi-store forecasting and portfolio-level KPI summary
 - Better reliability:
   - cleaner API error handling in frontend
   - live API status monitor in app shell
   - route lazy-loading for better startup performance
+  - model artifact cache with file-change invalidation for faster repeated forecasts
 - CI/CD readiness:
   - GitHub Actions workflow for backend compile checks and frontend production build
 
@@ -65,6 +70,45 @@ Place these files in `data/`:
 Optional:
 - `test.csv`
 - `sample_submission.csv`
+
+## Input Contract (Pre-ETL)
+
+Before ETL load, the project now runs a formal input validation + unification step for CSV ingestion:
+- file checks (existence, extension, size, row limits, parseability)
+- schema checks (required columns, aliases, unknown columns policy)
+- type normalization (numeric/date/string/bool coercion)
+- pre-load quality rules (null thresholds, duplicates policy, range checks)
+- machine-readable PASS/WARN/FAIL report generation
+
+See full contract:
+- `docs/Input_Data_Contract.md`
+
+### ETL Preflight Modes (Milestone 3)
+
+ETL now supports feature-flagged preflight integration with 3 modes:
+- `off` (default): preflight disabled, ETL uses raw `train.csv` / `store.csv`
+- `report_only`: run validation + unification and save artifacts, ETL still uses raw files
+- `enforce`: FAIL blocks ETL, PASS/WARN makes ETL consume unified canonical CSV outputs
+
+Milestone 4 adds contract-driven semantic quality rules evaluated on unified canonical data:
+- column rules: `between`, `accepted_values`, `max_null_ratio`
+- table rules: `composite_unique`, `row_count_between`
+- each rule has severity: `WARN` or `FAIL`
+- semantic `FAIL` blocks ETL only in `enforce` mode
+
+Configuration sources (priority: CLI > env vars > `etl/config.yaml`):
+- `PREFLIGHT_MODE=off|report_only|enforce`
+- `PREFLIGHT_PROFILE` (optional fallback profile)
+- `PREFLIGHT_PROFILE_TRAIN`, `PREFLIGHT_PROFILE_STORE` (optional per-file profile overrides)
+- `PREFLIGHT_CONTRACT_PATH`
+- `PREFLIGHT_ARTIFACT_DIR`
+
+Artifacts are written under:
+- `etl/reports/preflight/<run_id>/<train|store>/`
+  - `validation_report.json`
+  - `semantic_report.json`
+  - `manifest.json` (includes semantic section)
+  - `preflight_report.json` (combined view)
 
 ## Environment
 
@@ -182,6 +226,9 @@ Or:
 - System Summary: `http://localhost:8000/api/v1/system/summary`
 - Model Metadata: `http://localhost:8000/api/v1/model/metadata`
 - Scenario Forecast API: `POST http://localhost:8000/api/v1/forecast/scenario`
+- Batch Forecast API: `POST http://localhost:8000/api/v1/forecast/batch`
+- Preflight Runs API: `GET http://localhost:8000/api/v1/diagnostics/preflight/runs`
+- Preflight Latest API: `GET http://localhost:8000/api/v1/diagnostics/preflight/latest`
 
 ### Scenario API Example
 
@@ -211,3 +258,50 @@ If you prefer manual commands, follow module READMEs:
 - If frontend cannot call backend, verify `frontend/.env` contains `VITE_API_BASE_URL=http://localhost:8000/api/v1`.
 - If forecast fails, rerun model training and ensure `ml/artifacts/model.joblib` exists.
 - If model diagnostics endpoint fails, ensure `ml/artifacts/model_metadata.json` exists.
+
+## Preflight Diagnostics API (Milestone 5)
+
+Purpose:
+- persist preflight execution outcomes (train/store) in a run registry
+- expose read-only diagnostics for latest status and recent run history
+
+Endpoints:
+- `GET /api/v1/diagnostics/preflight/runs?limit=20`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}`
+- `GET /api/v1/diagnostics/preflight/latest`
+- `GET /api/v1/diagnostics/preflight/latest/{source_name}` (`train` or `store`)
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/artifacts`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/semantic`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/manifest`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/download/{artifact_type}`
+
+Example:
+
+```bash
+curl -s "http://localhost:8000/api/v1/diagnostics/preflight/runs?limit=5" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/preflight/latest" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/preflight/latest/train" | jq
+curl -s "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/semantic" | jq
+curl -L "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/download/manifest" -o manifest.json
+```
+
+Sample response (list item):
+
+```json
+{
+  "run_id": "20260221_183247",
+  "created_at": "2026-02-21T18:32:47Z",
+  "mode": "report_only",
+  "source_name": "train",
+  "validation_status": "PASS",
+  "semantic_status": "WARN",
+  "final_status": "WARN",
+  "blocked": false,
+  "used_unified": false,
+  "used_input_path": ".../rossmann_train_semantic_warn.csv",
+  "artifact_dir": ".../reports/preflight/20260221_183247/train",
+  "validation_report_path": ".../validation_report.json",
+  "manifest_path": ".../manifest.json"
+}
+```

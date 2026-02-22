@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +10,15 @@ import pandas as pd
 import sqlalchemy as sa
 
 from app.config import get_settings
+from app.db import engine
 
 settings = get_settings()
+
+_ARTIFACT_CACHE: dict[str, object] = {
+    "path": None,
+    "mtime": None,
+    "payload": None,
+}
 
 
 @dataclass(frozen=True)
@@ -42,7 +49,30 @@ def _resolve_model_path() -> Path:
     return from_repo
 
 
-def _fetch_history(engine: sa.Engine, store_id: int, history_days: int = 90) -> pd.DataFrame:
+def _validate_horizon(horizon_days: int) -> None:
+    if horizon_days < 1 or horizon_days > 180:
+        raise ValueError("horizon_days must be between 1 and 180")
+
+
+def _validate_store_ids(store_ids: list[int]) -> list[int]:
+    if not store_ids:
+        raise ValueError("store_ids cannot be empty")
+    unique_store_ids: list[int] = []
+    seen: set[int] = set()
+    for raw in store_ids:
+        if raw <= 0:
+            raise ValueError("store_ids must contain only positive integers")
+        if raw in seen:
+            continue
+        seen.add(raw)
+        unique_store_ids.append(raw)
+
+    if len(unique_store_ids) > 50:
+        raise ValueError("store_ids cannot contain more than 50 stores")
+    return unique_store_ids
+
+
+def _fetch_history(engine_ref: sa.Engine, store_id: int, history_days: int = 90) -> pd.DataFrame:
     query = sa.text(
         """
         SELECT
@@ -59,14 +89,14 @@ def _fetch_history(engine: sa.Engine, store_id: int, history_days: int = 90) -> 
         LIMIT :history_days;
         """
     )
-    df = pd.read_sql(query, engine, params={"store_id": store_id, "history_days": history_days})
+    df = pd.read_sql(query, engine_ref, params={"store_id": store_id, "history_days": history_days})
     if df.empty:
         raise ValueError(f"No data found for store_id={store_id}")
     df["full_date"] = pd.to_datetime(df["full_date"])
     return df.sort_values("full_date").reset_index(drop=True)
 
 
-def _fetch_store_meta(engine: sa.Engine, store_id: int) -> pd.Series:
+def _fetch_store_meta(engine_ref: sa.Engine, store_id: int) -> pd.Series:
     query = sa.text(
         """
         SELECT
@@ -79,7 +109,7 @@ def _fetch_store_meta(engine: sa.Engine, store_id: int) -> pd.Series:
         WHERE store_id = :store_id;
         """
     )
-    df = pd.read_sql(query, engine, params={"store_id": store_id})
+    df = pd.read_sql(query, engine_ref, params={"store_id": store_id})
     if df.empty:
         raise ValueError(f"store_id={store_id} not found in dim_store")
     return df.iloc[0]
@@ -245,11 +275,23 @@ def _load_artifact() -> dict:
     model_path = _resolve_model_path()
     if not model_path.exists():
         raise FileNotFoundError(f"Model not found: {model_path}")
-    return joblib.load(model_path)
+
+    current_mtime = model_path.stat().st_mtime
+    if (
+        _ARTIFACT_CACHE["payload"] is not None
+        and _ARTIFACT_CACHE["path"] == model_path
+        and _ARTIFACT_CACHE["mtime"] == current_mtime
+    ):
+        return _ARTIFACT_CACHE["payload"]  # type: ignore[return-value]
+
+    payload = joblib.load(model_path)
+    _ARTIFACT_CACHE["path"] = model_path
+    _ARTIFACT_CACHE["mtime"] = current_mtime
+    _ARTIFACT_CACHE["payload"] = payload
+    return payload
 
 
-def forecast_for_store(store_id: int, horizon_days: int) -> list[dict]:
-    artifact = _load_artifact()
+def _extract_artifact_parts(artifact: dict) -> tuple:
     model = artifact["model"]
     categorical_columns = artifact["categorical_columns"]
     feature_columns = artifact["feature_columns"]
@@ -257,8 +299,17 @@ def forecast_for_store(store_id: int, horizon_days: int) -> list[dict]:
     floor = float(artifact.get("prediction_floor", 0.0))
     cap = float(artifact["prediction_cap"]) if artifact.get("prediction_cap") is not None else None
     sigma = float(artifact.get("prediction_interval_sigma", 0.0))
+    return model, categorical_columns, feature_columns, target_transform, floor, cap, sigma
 
-    engine = sa.create_engine(settings.database_url)
+
+def forecast_for_store(store_id: int, horizon_days: int) -> list[dict]:
+    if store_id <= 0:
+        raise ValueError("store_id must be positive")
+    _validate_horizon(horizon_days)
+
+    artifact = _load_artifact()
+    model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
+
     history = _fetch_history(engine, store_id=store_id, history_days=90)
     store_meta = _fetch_store_meta(engine, store_id=store_id)
 
@@ -279,6 +330,80 @@ def forecast_for_store(store_id: int, horizon_days: int) -> list[dict]:
     )
 
 
+def _summarize_store_series(store_id: int, points: list[dict]) -> dict:
+    total = float(sum(float(item["predicted_sales"]) for item in points))
+    avg = float(total / len(points)) if points else 0.0
+
+    peak_point = max(points, key=lambda item: float(item["predicted_sales"])) if points else None
+    interval_widths = [
+        float(item["predicted_upper"]) - float(item["predicted_lower"])
+        for item in points
+        if item.get("predicted_upper") is not None and item.get("predicted_lower") is not None
+    ]
+
+    return {
+        "store_id": store_id,
+        "total_predicted_sales": total,
+        "avg_daily_sales": avg,
+        "peak_date": peak_point["date"] if peak_point else None,
+        "peak_sales": float(peak_point["predicted_sales"]) if peak_point else 0.0,
+        "avg_interval_width": float(np.mean(interval_widths)) if interval_widths else 0.0,
+    }
+
+
+def forecast_batch_for_stores(store_ids: list[int], horizon_days: int) -> dict:
+    normalized_store_ids = _validate_store_ids(store_ids)
+    _validate_horizon(horizon_days)
+
+    store_series: dict[int, list[dict]] = {}
+    for store_id in normalized_store_ids:
+        store_series[store_id] = forecast_for_store(store_id=store_id, horizon_days=horizon_days)
+
+    store_summaries = [_summarize_store_series(store_id, points) for store_id, points in store_series.items()]
+
+    portfolio_series: list[dict] = []
+    for index in range(horizon_days):
+        date_value = next(iter(store_series.values()))[index]["date"]
+        predicted_sales = float(sum(points[index]["predicted_sales"] for points in store_series.values()))
+        predicted_lower = float(sum(points[index]["predicted_lower"] for points in store_series.values()))
+        predicted_upper = float(sum(points[index]["predicted_upper"] for points in store_series.values()))
+        portfolio_series.append(
+            {
+                "date": date_value,
+                "predicted_sales": predicted_sales,
+                "predicted_lower": predicted_lower,
+                "predicted_upper": predicted_upper,
+            }
+        )
+
+    portfolio_total = float(sum(row["predicted_sales"] for row in portfolio_series))
+    portfolio_avg_daily = float(portfolio_total / horizon_days) if horizon_days > 0 else 0.0
+    portfolio_peak_point = max(portfolio_series, key=lambda row: row["predicted_sales"]) if portfolio_series else None
+    interval_widths = [
+        row["predicted_upper"] - row["predicted_lower"]
+        for row in portfolio_series
+        if row.get("predicted_upper") is not None and row.get("predicted_lower") is not None
+    ]
+
+    return {
+        "request": {
+            "store_ids": normalized_store_ids,
+            "horizon_days": horizon_days,
+        },
+        "store_summaries": store_summaries,
+        "portfolio_summary": {
+            "stores_count": len(normalized_store_ids),
+            "horizon_days": horizon_days,
+            "total_predicted_sales": portfolio_total,
+            "avg_daily_sales": portfolio_avg_daily,
+            "peak_date": portfolio_peak_point["date"] if portfolio_peak_point else None,
+            "peak_sales": float(portfolio_peak_point["predicted_sales"]) if portfolio_peak_point else 0.0,
+            "avg_interval_width": float(np.mean(interval_widths)) if interval_widths else 0.0,
+        },
+        "portfolio_series": portfolio_series,
+    }
+
+
 def forecast_scenario_for_store(
     *,
     store_id: int,
@@ -289,16 +414,13 @@ def forecast_scenario_for_store(
     demand_shift_pct: float,
     confidence_level: float,
 ) -> dict:
-    artifact = _load_artifact()
-    model = artifact["model"]
-    categorical_columns = artifact["categorical_columns"]
-    feature_columns = artifact["feature_columns"]
-    target_transform = str(artifact.get("target_transform", "none"))
-    floor = float(artifact.get("prediction_floor", 0.0))
-    cap = float(artifact["prediction_cap"]) if artifact.get("prediction_cap") is not None else None
-    sigma = float(artifact.get("prediction_interval_sigma", 0.0))
+    if store_id <= 0:
+        raise ValueError("store_id must be positive")
+    _validate_horizon(horizon_days)
 
-    engine = sa.create_engine(settings.database_url)
+    artifact = _load_artifact()
+    model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
+
     history = _fetch_history(engine, store_id=store_id, history_days=90)
     store_meta = _fetch_store_meta(engine, store_id=store_id)
 

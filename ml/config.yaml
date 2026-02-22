@@ -27,3 +27,8 @@ training:
 forecast:
   default_horizon_days: 30
   history_days: 90
+
+chatbot:
+  intents_path: chat_intents.json
+  model_path: artifacts/chat_intent_model.joblib
+  min_confidence: 0.45

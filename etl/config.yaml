@@ -1,4 +1,4 @@
-﻿paths:
+paths:
   train_csv: ../data/train.csv
   store_csv: ../data/store.csv
 
@@ -8,3 +8,139 @@ etl:
 
 database:
   url_env: DATABASE_URL
+
+preflight:
+  mode: off
+  contract_path: ../config/input_contract/contract_v1.yaml
+  artifact_dir: reports/preflight
+  profile_mapping:
+    train: rossmann_train
+    store: rossmann_store
+
+validation:
+  enabled: true
+  reports_dir: reports
+  encodings:
+    - utf-8
+    - utf-8-sig
+    - cp1251
+  file_limits:
+    max_file_size_mb: 200
+    max_rows: 2000000
+  profile_mapping:
+    train: rossmann_train
+    store: rossmann_store
+  policy:
+    on_unknown_columns: warn
+    on_duplicates: warn
+    on_invalid_dates: fail
+    type_coercion_fail_threshold: 0
+    null_threshold_required: 0.0
+  source_profiles:
+    rossmann_train:
+      required_columns:
+        - store_id
+        - day_of_week
+        - full_date
+        - sales
+      optional_columns:
+        - customers
+        - open
+        - promo
+        - state_holiday
+        - school_holiday
+      aliases:
+        store_id: [Store, store, storeid]
+        day_of_week: [DayOfWeek, dayofweek]
+        full_date: [Date, date]
+        sales: [Sales, sale]
+        customers: [Customers, customer_count]
+        open: [Open, is_open]
+        promo: [Promo, promotion]
+        state_holiday: [StateHoliday, stateholiday]
+        school_holiday: [SchoolHoliday, schoolholiday]
+      dtypes:
+        store_id: int
+        day_of_week: int
+        full_date: date
+        sales: float
+        customers: float
+        open: int
+        promo: int
+        state_holiday: string
+        school_holiday: int
+      duplicate_subset:
+        - store_id
+        - full_date
+      ranges:
+        sales:
+          min: 0
+        customers:
+          min: 0
+        promo:
+          allowed: [0, 1]
+        open:
+          allowed: [0, 1]
+        school_holiday:
+          allowed: [0, 1]
+        day_of_week:
+          min: 1
+          max: 7
+        full_date:
+          min_date: "2000-01-01"
+          max_date: "2100-12-31"
+
+    rossmann_store:
+      required_columns:
+        - store_id
+      optional_columns:
+        - store_type
+        - assortment
+        - competition_distance
+        - competition_open_since_month
+        - competition_open_since_year
+        - promo2
+        - promo2_since_week
+        - promo2_since_year
+        - promo_interval
+      aliases:
+        store_id: [Store, store, storeid]
+        store_type: [StoreType, storetype]
+        assortment: [Assortment]
+        competition_distance: [CompetitionDistance, competitiondistance]
+        competition_open_since_month: [CompetitionOpenSinceMonth, competitionopensincemonth]
+        competition_open_since_year: [CompetitionOpenSinceYear, competitionopensinceyear]
+        promo2: [Promo2]
+        promo2_since_week: [Promo2SinceWeek, promo2sinceweek]
+        promo2_since_year: [Promo2SinceYear, promo2sinceyear]
+        promo_interval: [PromoInterval, promointerval]
+      dtypes:
+        store_id: int
+        store_type: string
+        assortment: string
+        competition_distance: float
+        competition_open_since_month: int
+        competition_open_since_year: int
+        promo2: int
+        promo2_since_week: int
+        promo2_since_year: int
+        promo_interval: string
+      duplicate_subset:
+        - store_id
+      ranges:
+        competition_distance:
+          min: 0
+        competition_open_since_month:
+          min: 0
+          max: 12
+        competition_open_since_year:
+          min: 0
+          max: 2100
+        promo2:
+          allowed: [0, 1]
+        promo2_since_week:
+          min: 0
+          max: 53
+        promo2_since_year:
+          min: 0
+          max: 2100

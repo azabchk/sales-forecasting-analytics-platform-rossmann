@@ -5,6 +5,7 @@ API service for:
 - store catalog
 - KPI aggregation and sales time series
 - ML sales forecast with interval outputs
+- preflight diagnostics registry endpoints
 
 ## Setup
 
@@ -36,3 +37,23 @@ Swagger docs: `http://localhost:8000/docs`
 ## API Prefix
 
 All business endpoints are under `/api/v1`.
+
+## Preflight Diagnostics Endpoints
+
+- `GET /api/v1/diagnostics/preflight/runs?limit=20`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}`
+- `GET /api/v1/diagnostics/preflight/latest`
+- `GET /api/v1/diagnostics/preflight/latest/{source_name}`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/artifacts`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/semantic`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/manifest`
+- `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/download/{artifact_type}`
+
+Security notes:
+- Backend never accepts raw artifact file paths from client.
+- Artifact lookup is resolved from the preflight registry only.
+- All resolved paths are canonicalized and enforced under:
+  - `PREFLIGHT_ARTIFACT_ROOT` (if set), otherwise
+  - `etl/reports/preflight`
+- Out-of-scope paths return `403`.

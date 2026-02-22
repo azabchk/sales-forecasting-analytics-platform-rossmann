@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173"
     model_path: str = "ml/artifacts/model.joblib"
     model_metadata_path: str = "ml/artifacts/model_metadata.json"
+    chat_model_path: str = "ml/artifacts/chat_intent_model.joblib"
+    chat_min_confidence: float = 0.45
 
     backend_host: str = "0.0.0.0"
     backend_port: int = 8000

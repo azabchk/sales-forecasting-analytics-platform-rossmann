@@ -1,0 +1,89 @@
+{
+  "greeting": [
+    "hello",
+    "hi there",
+    "hey assistant",
+    "good morning",
+    "good evening",
+    "how are you",
+    "مرحبا",
+    "اهلا",
+    "هاي",
+    "ازيك",
+    "عامل ايه"
+  ],
+  "system_summary": [
+    "what is the system data coverage",
+    "how many stores do we have",
+    "show data range",
+    "how many rows in sales table",
+    "give me system summary",
+    "platform footprint",
+    "كم عدد المتاجر",
+    "اديني ملخص النظام",
+    "حجم الداتا كام",
+    "تاريخ البيانات من امتى لامتى"
+  ],
+  "model_summary": [
+    "what model is active",
+    "show model metrics",
+    "what is the model accuracy",
+    "mae rmse mape values",
+    "top important features",
+    "model quality",
+    "ملخص المودل",
+    "دقة المودل كام",
+    "ايه افضل مودل",
+    "feature importance"
+  ],
+  "top_stores": [
+    "show top stores by sales",
+    "top 5 stores",
+    "best performing stores",
+    "who are highest sales stores",
+    "رتب المتاجر حسب المبيعات",
+    "اعلى المتاجر مبيعا",
+    "top stores"
+  ],
+  "promo_impact": [
+    "promo impact for store 1",
+    "compare promo and no promo sales",
+    "does promotion increase sales",
+    "promotions effect",
+    "what is promo uplift",
+    "تاثير البرومو",
+    "البروموشن زود المبيعات ولا لا",
+    "فرق المبيعات مع البرومو"
+  ],
+  "forecast": [
+    "forecast store 1 for 30 days",
+    "predict sales for store 12 next 60 days",
+    "future sales projection",
+    "give me forecast",
+    "sales prediction for store 7",
+    "توقع مبيعات المتجر 1 لمدة 30 يوم",
+    "اعمل فوركاست للمتجر 5",
+    "تنبؤ المبيعات",
+    "predict next month sales"
+  ],
+  "kpi_summary": [
+    "show kpi summary for july",
+    "total sales and customers for store 4",
+    "sales summary from 2015-07-01 to 2015-07-31",
+    "daily average sales this month",
+    "revenue summary",
+    "ملخص المبيعات",
+    "اجمالي المبيعات والعملاء",
+    "kpi summary",
+    "summary for store 10"
+  ],
+  "help": [
+    "what can you do",
+    "help me with commands",
+    "how should i ask",
+    "available questions",
+    "عايز مساعده",
+    "تقدر تعمل ايه",
+    "ساعدني"
+  ]
+}

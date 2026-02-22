@@ -1,0 +1,183 @@
+{
+  "source_file_name": "rossmann_train_semantic_warn.csv",
+  "contract_version": "v1",
+  "profile": "rossmann_train",
+  "validation_status": "PASS",
+  "renamed_columns": {
+    "Store": "store_id",
+    "DayOfWeek": "day_of_week",
+    "Date": "full_date",
+    "Sales": "sales",
+    "Customers": "customers",
+    "Open": "open",
+    "Promo": "promo",
+    "StateHoliday": "state_holiday",
+    "SchoolHoliday": "school_holiday"
+  },
+  "extra_columns_dropped": [],
+  "coercion_stats": {
+    "store_id": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "day_of_week": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "full_date": {
+      "expected_dtype": "date",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "sales": {
+      "expected_dtype": "float",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "customers": {
+      "expected_dtype": "float",
+      "invalid_to_null": 0,
+      "null_count_after": 1
+    },
+    "open": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "state_holiday": {
+      "expected_dtype": "string",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "school_holiday": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    }
+  },
+  "output_row_count": 2,
+  "output_column_count": 9,
+  "final_canonical_columns": [
+    "store_id",
+    "day_of_week",
+    "full_date",
+    "sales",
+    "customers",
+    "open",
+    "promo",
+    "state_holiday",
+    "school_holiday"
+  ],
+  "retained_extra_columns": [],
+  "semantic_quality": {
+    "status": "WARN",
+    "summary": "Semantic quality checks completed with warnings.",
+    "counts": {
+      "total": 5,
+      "passed": 4,
+      "warned": 1,
+      "failed": 0
+    },
+    "rules": [
+      {
+        "rule_id": "sales_non_negative",
+        "rule_type": "between",
+        "target": [
+          "sales"
+        ],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 2,
+          "null_or_invalid_count": 0,
+          "out_of_range_count": 0,
+          "violation_count": 0,
+          "min_allowed": 0.0,
+          "max_allowed": null,
+          "min_observed": 5263.0,
+          "max_observed": 6064.0
+        },
+        "message": "Column 'sales' is within configured range."
+      },
+      {
+        "rule_id": "day_of_week_allowed",
+        "rule_type": "accepted_values",
+        "target": [
+          "day_of_week"
+        ],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 2,
+          "invalid_count": 0,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "invalid_values_sample": []
+        },
+        "message": "Column 'day_of_week' only contains accepted values."
+      },
+      {
+        "rule_id": "customers_null_ratio",
+        "rule_type": "max_null_ratio",
+        "target": [
+          "customers"
+        ],
+        "severity": "WARN",
+        "status": "WARN",
+        "observed": {
+          "row_count": 2,
+          "null_count": 1,
+          "null_ratio": 0.5,
+          "max_null_ratio": 0.1
+        },
+        "message": "Column 'customers' null ratio 0.5000 exceeds allowed threshold 0.1000."
+      },
+      {
+        "rule_id": "train_pk_unique",
+        "rule_type": "composite_unique",
+        "target": [
+          "store_id",
+          "full_date"
+        ],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 2,
+          "columns": [
+            "store_id",
+            "full_date"
+          ],
+          "duplicate_row_count": 0
+        },
+        "message": "Composite key ['store_id', 'full_date'] is unique."
+      },
+      {
+        "rule_id": "row_count_min",
+        "rule_type": "row_count_between",
+        "target": [],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 2,
+          "min_allowed": 1,
+          "max_allowed": null
+        },
+        "message": "Row count is within configured bounds."
+      }
+    ]
+  }
+}

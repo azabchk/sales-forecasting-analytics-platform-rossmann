@@ -1,0 +1,355 @@
+{
+  "mode": "enforce",
+  "source_name": "train",
+  "raw_input_path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/tests/fixtures/input_samples/rossmann_train_semantic_fail_sales.csv",
+  "etl_input_path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/validation_reports/m4_demo_console/20260221_183236/train/unified.csv",
+  "validation": {
+    "status": "PASS",
+    "contract_version": "v1",
+    "file_name": "rossmann_train_semantic_fail_sales.csv",
+    "file_path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/tests/fixtures/input_samples/rossmann_train_semantic_fail_sales.csv",
+    "profile": "rossmann_train",
+    "checks": {
+      "format": "PASS",
+      "file_size": "PASS",
+      "row_limit": "PASS",
+      "required_columns": "PASS",
+      "types": "PASS",
+      "extra_columns": "PASS"
+    },
+    "errors": [],
+    "warnings": [],
+    "summary": "Validation passed.",
+    "metadata": {
+      "format": "csv",
+      "encoding": "utf-8",
+      "rows": 1,
+      "file_size_bytes": 106,
+      "max_rows": 2000000,
+      "max_file_size_mb": 200.0,
+      "allow_extra_columns": true,
+      "strict_types": false,
+      "mapped_columns": [
+        "customers",
+        "day_of_week",
+        "full_date",
+        "open",
+        "promo",
+        "sales",
+        "school_holiday",
+        "state_holiday",
+        "store_id"
+      ],
+      "renamed_columns": {
+        "Store": "store_id",
+        "DayOfWeek": "day_of_week",
+        "Date": "full_date",
+        "Sales": "sales",
+        "Customers": "customers",
+        "Open": "open",
+        "Promo": "promo",
+        "StateHoliday": "state_holiday",
+        "SchoolHoliday": "school_holiday"
+      },
+      "extra_columns": [],
+      "type_mismatches": {
+        "store_id": 0,
+        "day_of_week": 0,
+        "full_date": 0,
+        "sales": 0,
+        "customers": 0,
+        "open": 0,
+        "promo": 0,
+        "state_holiday": 0,
+        "school_holiday": 0
+      }
+    }
+  },
+  "unification": {
+    "source_file_name": "rossmann_train_semantic_fail_sales.csv",
+    "contract_version": "v1",
+    "profile": "rossmann_train",
+    "validation_status": "PASS",
+    "renamed_columns": {
+      "Store": "store_id",
+      "DayOfWeek": "day_of_week",
+      "Date": "full_date",
+      "Sales": "sales",
+      "Customers": "customers",
+      "Open": "open",
+      "Promo": "promo",
+      "StateHoliday": "state_holiday",
+      "SchoolHoliday": "school_holiday"
+    },
+    "extra_columns_dropped": [],
+    "coercion_stats": {
+      "store_id": {
+        "expected_dtype": "int",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "day_of_week": {
+        "expected_dtype": "int",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "full_date": {
+        "expected_dtype": "date",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "sales": {
+        "expected_dtype": "float",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "customers": {
+        "expected_dtype": "float",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "open": {
+        "expected_dtype": "int",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "promo": {
+        "expected_dtype": "int",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "state_holiday": {
+        "expected_dtype": "string",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      },
+      "school_holiday": {
+        "expected_dtype": "int",
+        "invalid_to_null": 0,
+        "null_count_after": 0
+      }
+    },
+    "output_row_count": 1,
+    "output_column_count": 9,
+    "final_canonical_columns": [
+      "store_id",
+      "day_of_week",
+      "full_date",
+      "sales",
+      "customers",
+      "open",
+      "promo",
+      "state_holiday",
+      "school_holiday"
+    ],
+    "retained_extra_columns": [],
+    "semantic_quality": {
+      "status": "FAIL",
+      "summary": "Semantic quality checks failed.",
+      "counts": {
+        "total": 5,
+        "passed": 4,
+        "warned": 0,
+        "failed": 1
+      },
+      "rules": [
+        {
+          "rule_id": "sales_non_negative",
+          "rule_type": "between",
+          "target": [
+            "sales"
+          ],
+          "severity": "FAIL",
+          "status": "FAIL",
+          "observed": {
+            "row_count": 1,
+            "null_or_invalid_count": 0,
+            "out_of_range_count": 1,
+            "violation_count": 1,
+            "min_allowed": 0.0,
+            "max_allowed": null,
+            "min_observed": -50.0,
+            "max_observed": -50.0
+          },
+          "message": "Column 'sales' has 1 violating rows (null/invalid=0, out_of_range=1)."
+        },
+        {
+          "rule_id": "day_of_week_allowed",
+          "rule_type": "accepted_values",
+          "target": [
+            "day_of_week"
+          ],
+          "severity": "FAIL",
+          "status": "PASS",
+          "observed": {
+            "row_count": 1,
+            "invalid_count": 0,
+            "allowed_values": [
+              1,
+              2,
+              3,
+              4,
+              5,
+              6,
+              7
+            ],
+            "invalid_values_sample": []
+          },
+          "message": "Column 'day_of_week' only contains accepted values."
+        },
+        {
+          "rule_id": "customers_null_ratio",
+          "rule_type": "max_null_ratio",
+          "target": [
+            "customers"
+          ],
+          "severity": "WARN",
+          "status": "PASS",
+          "observed": {
+            "row_count": 1,
+            "null_count": 0,
+            "null_ratio": 0.0,
+            "max_null_ratio": 0.1
+          },
+          "message": "Column 'customers' null ratio is within threshold."
+        },
+        {
+          "rule_id": "train_pk_unique",
+          "rule_type": "composite_unique",
+          "target": [
+            "store_id",
+            "full_date"
+          ],
+          "severity": "FAIL",
+          "status": "PASS",
+          "observed": {
+            "row_count": 1,
+            "columns": [
+              "store_id",
+              "full_date"
+            ],
+            "duplicate_row_count": 0
+          },
+          "message": "Composite key ['store_id', 'full_date'] is unique."
+        },
+        {
+          "rule_id": "row_count_min",
+          "rule_type": "row_count_between",
+          "target": [],
+          "severity": "FAIL",
+          "status": "PASS",
+          "observed": {
+            "row_count": 1,
+            "min_allowed": 1,
+            "max_allowed": null
+          },
+          "message": "Row count is within configured bounds."
+        }
+      ]
+    }
+  },
+  "semantic": {
+    "status": "FAIL",
+    "summary": "Semantic quality checks failed.",
+    "counts": {
+      "total": 5,
+      "passed": 4,
+      "warned": 0,
+      "failed": 1
+    },
+    "rules": [
+      {
+        "rule_id": "sales_non_negative",
+        "rule_type": "between",
+        "target": [
+          "sales"
+        ],
+        "severity": "FAIL",
+        "status": "FAIL",
+        "observed": {
+          "row_count": 1,
+          "null_or_invalid_count": 0,
+          "out_of_range_count": 1,
+          "violation_count": 1,
+          "min_allowed": 0.0,
+          "max_allowed": null,
+          "min_observed": -50.0,
+          "max_observed": -50.0
+        },
+        "message": "Column 'sales' has 1 violating rows (null/invalid=0, out_of_range=1)."
+      },
+      {
+        "rule_id": "day_of_week_allowed",
+        "rule_type": "accepted_values",
+        "target": [
+          "day_of_week"
+        ],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 1,
+          "invalid_count": 0,
+          "allowed_values": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ],
+          "invalid_values_sample": []
+        },
+        "message": "Column 'day_of_week' only contains accepted values."
+      },
+      {
+        "rule_id": "customers_null_ratio",
+        "rule_type": "max_null_ratio",
+        "target": [
+          "customers"
+        ],
+        "severity": "WARN",
+        "status": "PASS",
+        "observed": {
+          "row_count": 1,
+          "null_count": 0,
+          "null_ratio": 0.0,
+          "max_null_ratio": 0.1
+        },
+        "message": "Column 'customers' null ratio is within threshold."
+      },
+      {
+        "rule_id": "train_pk_unique",
+        "rule_type": "composite_unique",
+        "target": [
+          "store_id",
+          "full_date"
+        ],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 1,
+          "columns": [
+            "store_id",
+            "full_date"
+          ],
+          "duplicate_row_count": 0
+        },
+        "message": "Composite key ['store_id', 'full_date'] is unique."
+      },
+      {
+        "rule_id": "row_count_min",
+        "rule_type": "row_count_between",
+        "target": [],
+        "severity": "FAIL",
+        "status": "PASS",
+        "observed": {
+          "row_count": 1,
+          "min_allowed": 1,
+          "max_allowed": null
+        },
+        "message": "Row count is within configured bounds."
+      }
+    ]
+  }
+}

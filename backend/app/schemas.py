@@ -1,4 +1,5 @@
-﻿from datetime import date
+﻿from datetime import date, datetime
+from typing import Any
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -47,6 +48,11 @@ class ForecastRequest(BaseModel):
     horizon_days: int = Field(30, ge=1, le=180)
 
 
+class ForecastBatchRequest(BaseModel):
+    store_ids: list[int] = Field(..., min_length=1, max_length=50)
+    horizon_days: int = Field(30, ge=1, le=180)
+
+
 class ForecastPoint(BaseModel):
     date: date
     predicted_sales: float
@@ -87,6 +93,32 @@ class ForecastScenarioResponse(BaseModel):
     request: ForecastScenarioRequest
     summary: ForecastScenarioSummary
     points: list[ForecastScenarioPoint]
+
+
+class ForecastBatchStoreSummary(BaseModel):
+    store_id: int
+    total_predicted_sales: float
+    avg_daily_sales: float
+    peak_date: date | None = None
+    peak_sales: float
+    avg_interval_width: float
+
+
+class ForecastBatchPortfolioSummary(BaseModel):
+    stores_count: int
+    horizon_days: int
+    total_predicted_sales: float
+    avg_daily_sales: float
+    peak_date: date | None = None
+    peak_sales: float
+    avg_interval_width: float
+
+
+class ForecastBatchResponse(BaseModel):
+    request: ForecastBatchRequest
+    store_summaries: list[ForecastBatchStoreSummary]
+    portfolio_summary: ForecastBatchPortfolioSummary
+    portfolio_series: list[ForecastPoint]
 
 
 class SystemSummaryResponse(BaseModel):
@@ -139,3 +171,121 @@ class ModelMetadataResponse(BaseModel):
     train_period: ModelPeriod | None = None
     validation_period: ModelPeriod | None = None
     rows: ModelRows | None = None
+
+
+class ChatQueryRequest(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+
+
+class ChatInsight(BaseModel):
+    label: str
+    value: str
+
+
+class ChatResponse(BaseModel):
+    answer: str
+    insights: list[ChatInsight] = Field(default_factory=list)
+    suggestions: list[str] = Field(default_factory=list)
+
+
+class PreflightRunSummary(BaseModel):
+    run_id: str
+    created_at: datetime
+    mode: str
+    source_name: str
+    validation_status: str
+    semantic_status: str
+    final_status: str
+    blocked: bool
+    block_reason: str | None = None
+    used_unified: bool
+    used_input_path: str
+    artifact_dir: str | None = None
+    validation_report_path: str | None = None
+    manifest_path: str | None = None
+
+
+class PreflightRunsListResponse(BaseModel):
+    items: list[PreflightRunSummary]
+    limit: int
+    source_name: str | None = None
+
+
+class PreflightRunDetailResponse(BaseModel):
+    run_id: str
+    created_at: datetime
+    mode: str
+    final_status: str
+    blocked: bool
+    records: list[PreflightRunSummary]
+
+
+PreflightArtifactType = Literal["validation", "semantic", "manifest", "preflight", "unified_csv"]
+
+
+class PreflightArtifactIndexItem(BaseModel):
+    artifact_type: PreflightArtifactType
+    available: bool
+    file_name: str | None = None
+    path: str | None = None
+    size_bytes: int | None = None
+    content_type: str | None = None
+    download_url: str | None = None
+
+
+class PreflightSourceArtifactsResponse(BaseModel):
+    run_id: str
+    source_name: str
+    artifact_dir: str | None = None
+    artifacts: list[PreflightArtifactIndexItem]
+
+
+class PreflightValidationArtifactResponse(BaseModel):
+    run_id: str
+    source_name: str
+    status: str
+    contract_version: str | None = None
+    profile: str | None = None
+    checks: dict[str, str] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    summary: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    artifact_path: str | None = None
+
+
+class PreflightSemanticRuleResponse(BaseModel):
+    rule_id: str
+    rule_type: str
+    severity: str
+    status: str
+    message: str
+    target: list[str] = Field(default_factory=list)
+    observed: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreflightSemanticArtifactResponse(BaseModel):
+    run_id: str
+    source_name: str
+    status: str
+    summary: str | None = None
+    counts: dict[str, int] = Field(default_factory=dict)
+    rules: list[PreflightSemanticRuleResponse] = Field(default_factory=list)
+    artifact_path: str | None = None
+
+
+class PreflightManifestArtifactResponse(BaseModel):
+    run_id: str
+    source_name: str
+    contract_version: str | None = None
+    profile: str | None = None
+    validation_status: str | None = None
+    renamed_columns: dict[str, str] = Field(default_factory=dict)
+    extra_columns_dropped: list[str] = Field(default_factory=list)
+    coercion_stats: dict[str, Any] = Field(default_factory=dict)
+    final_canonical_columns: list[str] = Field(default_factory=list)
+    retained_extra_columns: list[str] = Field(default_factory=list)
+    output_row_count: int | None = None
+    output_column_count: int | None = None
+    semantic_quality: dict[str, Any] | None = None
+    artifact_path: str | None = None

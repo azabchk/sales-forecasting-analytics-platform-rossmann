@@ -1,0 +1,79 @@
+{
+  "source_file_name": "rossmann_train_valid.csv",
+  "contract_version": "v1",
+  "profile": "rossmann_train",
+  "validation_status": "PASS",
+  "renamed_columns": {
+    "Store": "store_id",
+    "DayOfWeek": "day_of_week",
+    "Date": "full_date",
+    "Sales": "sales",
+    "Customers": "customers",
+    "Open": "open",
+    "Promo": "promo",
+    "StateHoliday": "state_holiday",
+    "SchoolHoliday": "school_holiday"
+  },
+  "extra_columns_dropped": [],
+  "coercion_stats": {
+    "store_id": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "day_of_week": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "full_date": {
+      "expected_dtype": "date",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "sales": {
+      "expected_dtype": "float",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "customers": {
+      "expected_dtype": "float",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "open": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "promo": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "state_holiday": {
+      "expected_dtype": "string",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    },
+    "school_holiday": {
+      "expected_dtype": "int",
+      "invalid_to_null": 0,
+      "null_count_after": 0
+    }
+  },
+  "output_row_count": 2,
+  "output_column_count": 9,
+  "final_canonical_columns": [
+    "store_id",
+    "day_of_week",
+    "full_date",
+    "sales",
+    "customers",
+    "open",
+    "promo",
+    "state_holiday",
+    "school_holiday"
+  ],
+  "retained_extra_columns": []
+}

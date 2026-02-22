@@ -1,0 +1,67 @@
+{
+  "status": "WARN",
+  "contract_version": "v1",
+  "file_name": "rossmann_train_alias_mixed.csv",
+  "file_path": "/home/azab-22/Desktop/sales-forecasting-analytics-platform-rossmann/tests/fixtures/input_samples/rossmann_train_alias_mixed.csv",
+  "profile": "rossmann_train",
+  "checks": {
+    "format": "PASS",
+    "file_size": "PASS",
+    "row_limit": "PASS",
+    "required_columns": "PASS",
+    "types": "WARN",
+    "extra_columns": "WARN"
+  },
+  "errors": [],
+  "warnings": [
+    "Extra columns detected: ['ExtraField']",
+    "Type mismatches detected: 4 values"
+  ],
+  "summary": "Validation completed with warnings.",
+  "metadata": {
+    "format": "csv",
+    "encoding": "utf-8",
+    "rows": 2,
+    "file_size_bytes": 183,
+    "max_rows": 2000000,
+    "max_file_size_mb": 200.0,
+    "allow_extra_columns": true,
+    "strict_types": false,
+    "mapped_columns": [
+      "customers",
+      "day_of_week",
+      "full_date",
+      "open",
+      "promo",
+      "sales",
+      "school_holiday",
+      "state_holiday",
+      "store_id"
+    ],
+    "renamed_columns": {
+      "storeid": "store_id",
+      "dayofweek": "day_of_week",
+      "date": "full_date",
+      "sale": "sales",
+      "Customers": "customers",
+      "is_open": "open",
+      "promotion": "promo",
+      "stateholiday": "state_holiday",
+      "schoolholiday": "school_holiday"
+    },
+    "extra_columns": [
+      "ExtraField"
+    ],
+    "type_mismatches": {
+      "store_id": 0,
+      "day_of_week": 1,
+      "full_date": 1,
+      "sales": 1,
+      "customers": 0,
+      "open": 1,
+      "promo": 0,
+      "state_holiday": 0,
+      "school_holiday": 0
+    }
+  }
+}

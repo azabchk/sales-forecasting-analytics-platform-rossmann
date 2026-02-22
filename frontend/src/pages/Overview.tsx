@@ -8,6 +8,7 @@ import SalesChart from "../components/SalesChart";
 import StoreSelector from "../components/StoreSelector";
 import { rangeFromPastDays, rangeYtd } from "../lib/dates";
 import { formatInt, formatPercent } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
 type OverviewSalesPoint = {
   date: string;
@@ -20,6 +21,7 @@ function getDefaultRange() {
 }
 
 export default function Overview() {
+  const { locale, localeTag } = useI18n();
   const defaults = useMemo(() => getDefaultRange(), []);
 
   const [stores, setStores] = useState<Store[]>([]);
@@ -38,7 +40,11 @@ export default function Overview() {
   React.useEffect(() => {
     fetchStores()
       .then(setStores)
-      .catch((errorResponse) => setStoresError(extractApiError(errorResponse, "Failed to load stores list.")));
+      .catch((errorResponse) =>
+        setStoresError(
+          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
+        )
+      );
   }, []);
 
   const invalidRange = dateFrom > dateTo;
@@ -81,13 +87,20 @@ export default function Overview() {
 
       setKpi(kpiResp);
       setSeries(grouped);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
-      setError(extractApiError(errorResponse, "Failed to load overview metrics. Ensure backend is running and date range is valid."));
+      setError(
+        extractApiError(
+          errorResponse,
+          locale === "ru"
+            ? "Не удалось загрузить метрики обзора. Проверьте backend и диапазон дат."
+            : "Failed to load overview metrics. Ensure backend is running and date range is valid."
+        )
+      );
     } finally {
       setLoading(false);
     }
-  }, [dateFrom, dateTo, granularity, invalidRange, storeId]);
+  }, [dateFrom, dateTo, granularity, invalidRange, locale, localeTag, storeId]);
 
   React.useEffect(() => {
     load();
@@ -117,10 +130,14 @@ export default function Overview() {
       <div className="page-head">
         <div>
           <h2 className="page-title">Executive Overview</h2>
-          <p className="page-note">Portfolio KPI tracking, trend diagnostics, and store-level focus filters.</p>
+          <p className="page-note">
+            {locale === "ru"
+              ? "Мониторинг KPI портфеля, диагностика трендов и фильтры по магазинам."
+              : "Portfolio KPI tracking, trend diagnostics, and store-level focus filters."}
+          </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">Last update: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
           <div className="preset-row">
             <button className="button ghost" onClick={() => applyPreset("30d")} type="button">
               30D
@@ -140,9 +157,9 @@ export default function Overview() {
 
       <div className="panel">
         <div className="controls">
-          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label="Store focus" includeAllOption id="overview-store" />
+          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label={locale === "ru" ? "Фокус по магазину" : "Store focus"} includeAllOption id="overview-store" />
           <div className="field">
-            <label htmlFor="overview-date-from">Date from</label>
+            <label htmlFor="overview-date-from">{locale === "ru" ? "Дата с" : "Date from"}</label>
             <input
               id="overview-date-from"
               className="input"
@@ -152,7 +169,7 @@ export default function Overview() {
             />
           </div>
           <div className="field">
-            <label htmlFor="overview-date-to">Date to</label>
+            <label htmlFor="overview-date-to">{locale === "ru" ? "Дата по" : "Date to"}</label>
             <input
               id="overview-date-to"
               className="input"
@@ -162,25 +179,25 @@ export default function Overview() {
             />
           </div>
           <div className="field">
-            <label htmlFor="overview-granularity">Granularity</label>
+            <label htmlFor="overview-granularity">{locale === "ru" ? "Гранулярность" : "Granularity"}</label>
             <select
               id="overview-granularity"
               className="select"
               value={granularity}
               onChange={(e) => setGranularity(e.target.value as "daily" | "monthly")}
             >
-              <option value="daily">Daily</option>
-              <option value="monthly">Monthly</option>
+              <option value="daily">{locale === "ru" ? "День" : "Daily"}</option>
+              <option value="monthly">{locale === "ru" ? "Месяц" : "Monthly"}</option>
             </select>
           </div>
           <button className="button primary" onClick={load} disabled={loading || invalidRange}>
-            {loading ? "Loading..." : "Refresh"}
+            {loading ? (locale === "ru" ? "Загрузка..." : "Loading...") : locale === "ru" ? "Обновить" : "Refresh"}
           </button>
         </div>
       </div>
 
       {storesError && <p className="error">{storesError}</p>}
-      {invalidRange && <p className="error">Date from cannot be greater than Date to.</p>}
+      {invalidRange && <p className="error">{locale === "ru" ? "Дата начала не может быть позже даты окончания." : "Date from cannot be greater than Date to."}</p>}
       {error && <p className="error">{error}</p>}
 
       {loading && !kpi && (
@@ -202,26 +219,26 @@ export default function Overview() {
       {insights && (
         <div className="insight-grid">
           <div className="insight-card">
-            <p className="insight-label">Period Span</p>
-            <p className="insight-value">{formatInt(insights.spanDays)} days</p>
+            <p className="insight-label">{locale === "ru" ? "Период" : "Period Span"}</p>
+            <p className="insight-value">{formatInt(insights.spanDays)} {locale === "ru" ? "дней" : "days"}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">Trend Direction</p>
+            <p className="insight-label">{locale === "ru" ? "Направление тренда" : "Trend Direction"}</p>
             <p className={`insight-value ${insights.trend >= 0 ? "positive" : "negative"}`}>{formatPercent(insights.trend)}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">Peak Sales Day</p>
+            <p className="insight-label">{locale === "ru" ? "Пик продаж" : "Peak Sales Day"}</p>
             <p className="insight-value">
-              {formatInt(insights.peakSales)} on {insights.peakDate}
+              {formatInt(insights.peakSales)} {locale === "ru" ? "в" : "on"} {insights.peakDate}
             </p>
           </div>
         </div>
       )}
 
       {series.length > 0 ? (
-        <SalesChart data={series} title="Total Sales Trend" granularity={granularity} />
+        <SalesChart data={series} title={locale === "ru" ? "Тренд общих продаж" : "Total Sales Trend"} granularity={granularity} />
       ) : (
-        !loading && <p className="muted">No sales rows for selected filters.</p>
+        !loading && <p className="muted">{locale === "ru" ? "Нет данных продаж для выбранных фильтров." : "No sales rows for selected filters."}</p>
       )}
     </section>
   );

@@ -3,6 +3,7 @@ import React from "react";
 import { extractApiError } from "../api/client";
 import { fetchModelMetadata, fetchSystemSummary, ModelMetadata, SystemSummary } from "../api/endpoints";
 import ImportanceChart from "../components/ImportanceChart";
+import { useI18n } from "../lib/i18n";
 import LoadingBlock from "../components/LoadingBlock";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
 
@@ -36,6 +37,7 @@ function utcOrDash(value: string | null | undefined): string {
 }
 
 export default function ModelIntelligence() {
+  const { locale, localeTag } = useI18n();
   const [summary, setSummary] = React.useState<SystemSummary | null>(null);
   const [metadata, setMetadata] = React.useState<ModelMetadata | null>(null);
   const [loading, setLoading] = React.useState(false);
@@ -49,13 +51,18 @@ export default function ModelIntelligence() {
       const [summaryResponse, metadataResponse] = await Promise.all([fetchSystemSummary(), fetchModelMetadata()]);
       setSummary(summaryResponse);
       setMetadata(metadataResponse);
-      setLastUpdated(new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }));
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
-      setError(extractApiError(errorResponse, "Unable to load model intelligence data."));
+      setError(
+        extractApiError(
+          errorResponse,
+          locale === "ru" ? "Не удалось загрузить данные по качеству модели." : "Unable to load model intelligence data."
+        )
+      );
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [locale, localeTag]);
 
   React.useEffect(() => {
     load();
@@ -75,13 +82,17 @@ export default function ModelIntelligence() {
     <section className="page">
       <div className="page-head">
         <div>
-          <h2 className="page-title">Model Intelligence</h2>
-          <p className="page-note">Governance view for model quality, data scale, and feature contribution.</p>
+          <h2 className="page-title">{locale === "ru" ? "Интеллект модели" : "Model Intelligence"}</h2>
+          <p className="page-note">
+            {locale === "ru"
+              ? "Управленческий обзор качества модели, масштаба данных и вклада признаков."
+              : "Governance view for model quality, data scale, and feature contribution."}
+          </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">Last update: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
           <button className="button primary" type="button" onClick={load} disabled={loading}>
-            {loading ? "Refreshing..." : "Refresh diagnostics"}
+            {loading ? (locale === "ru" ? "Обновление..." : "Refreshing...") : locale === "ru" ? "Обновить диагностику" : "Refresh diagnostics"}
           </button>
         </div>
       </div>
@@ -98,60 +109,60 @@ export default function ModelIntelligence() {
         <>
           <div className="insight-grid">
             <div className="insight-card">
-              <p className="insight-label">Selected Model</p>
+              <p className="insight-label">{locale === "ru" ? "Выбранная модель" : "Selected Model"}</p>
               <p className="insight-value">{metadata.selected_model.toUpperCase()}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation RMSE</p>
+              <p className="insight-label">{locale === "ru" ? "RMSE валидации" : "Validation RMSE"}</p>
               <p className="insight-value">{metricOrDash(bestMetrics?.rmse)}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation WAPE</p>
+              <p className="insight-label">{locale === "ru" ? "WAPE валидации" : "Validation WAPE"}</p>
               <p className="insight-value">
                 {typeof bestMetrics?.wape === "number" ? formatPercent(bestMetrics.wape) : "-"}
               </p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation MAE</p>
+              <p className="insight-label">{locale === "ru" ? "MAE валидации" : "Validation MAE"}</p>
               <p className="insight-value">{metricOrDash(bestMetrics?.mae)}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation sMAPE</p>
+              <p className="insight-label">{locale === "ru" ? "sMAPE валидации" : "Validation sMAPE"}</p>
               <p className="insight-value">{typeof bestMetrics?.smape === "number" ? formatPercent(bestMetrics.smape) : "-"}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation MAPE (non-zero)</p>
+              <p className="insight-label">{locale === "ru" ? "MAPE валидации (ненул.)" : "Validation MAPE (non-zero)"}</p>
               <p className="insight-value">{typeof bestMetrics?.mape_nonzero === "number" ? formatPercent(bestMetrics.mape_nonzero) : "-"}</p>
             </div>
           </div>
 
           <div className="insight-grid">
             <div className="insight-card">
-              <p className="insight-label">Stores in DB</p>
+              <p className="insight-label">{locale === "ru" ? "Магазины в БД" : "Stores in DB"}</p>
               <p className="insight-value">{formatInt(summary.stores_count)}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Sales Rows in DB</p>
+              <p className="insight-label">{locale === "ru" ? "Строк продаж в БД" : "Sales Rows in DB"}</p>
               <p className="insight-value">{formatInt(summary.sales_rows_count)}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Train Window</p>
+              <p className="insight-label">{locale === "ru" ? "Период обучения" : "Train Window"}</p>
               <p className="insight-value">
-                {formatIsoDate(metadata.train_period?.date_from)} to {formatIsoDate(metadata.train_period?.date_to)}
+                {formatIsoDate(metadata.train_period?.date_from)} {locale === "ru" ? "до" : "to"} {formatIsoDate(metadata.train_period?.date_to)}
               </p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation Window</p>
+              <p className="insight-label">{locale === "ru" ? "Период валидации" : "Validation Window"}</p>
               <p className="insight-value">
-                {formatIsoDate(metadata.validation_period?.date_from)} to {formatIsoDate(metadata.validation_period?.date_to)}
+                {formatIsoDate(metadata.validation_period?.date_from)} {locale === "ru" ? "до" : "to"} {formatIsoDate(metadata.validation_period?.date_to)}
               </p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Trained At (UTC)</p>
+              <p className="insight-label">{locale === "ru" ? "Время обучения (UTC)" : "Trained At (UTC)"}</p>
               <p className="insight-value">{utcOrDash(metadata.trained_at)}</p>
             </div>
             <div className="insight-card">
-              <p className="insight-label">Validation Rows</p>
+              <p className="insight-label">{locale === "ru" ? "Строк валидации" : "Validation Rows"}</p>
               <p className="insight-value">{formatInt(metadata.rows?.validation ?? 0)}</p>
             </div>
           </div>
@@ -160,27 +171,27 @@ export default function ModelIntelligence() {
 
           <div className="panel">
             <div className="panel-head">
-              <h3>Model Diagnostics</h3>
-              <p className="panel-subtitle">Candidate metrics and final selection evidence.</p>
+              <h3>{locale === "ru" ? "Диагностика модели" : "Model Diagnostics"}</h3>
+              <p className="panel-subtitle">{locale === "ru" ? "Метрики кандидатов и основание финального выбора." : "Candidate metrics and final selection evidence."}</p>
             </div>
             <div className="table-wrap">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Candidate</th>
+                    <th>{locale === "ru" ? "Кандидат" : "Candidate"}</th>
                     <th>RMSE</th>
                     <th>MAE</th>
                     <th>WAPE</th>
                     <th>MAPE*</th>
                     <th>sMAPE</th>
                     <th>MAPE NZ</th>
-                    <th>Params</th>
+                    <th>{locale === "ru" ? "Параметры" : "Params"}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {candidates.map((candidate, index) => (
                     <tr key={`candidate-${index}`}>
-                      <td>CatBoost #{index + 1}</td>
+                      <td>{locale === "ru" ? "CatBoost" : "CatBoost"} #{index + 1}</td>
                       <td>{metricOrDash(candidate.metrics.rmse)}</td>
                       <td>{metricOrDash(candidate.metrics.mae)}</td>
                       <td>{typeof candidate.metrics.wape === "number" ? formatPercent(candidate.metrics.wape) : "-"}</td>
@@ -194,14 +205,16 @@ export default function ModelIntelligence() {
                   ))}
                   {candidates.length === 0 && (
                     <tr>
-                      <td colSpan={8}>No candidate records available in metadata.</td>
+                      <td colSpan={8}>{locale === "ru" ? "Нет записей кандидатов в metadata." : "No candidate records available in metadata."}</td>
                     </tr>
                   )}
                 </tbody>
               </table>
             </div>
             <p className="muted">
-              * If MAPE is extremely large, prefer WAPE or non-zero MAPE. Current non-zero MAPE: {metricOrDash(nonZeroMape)}
+              {locale === "ru"
+                ? `* Если MAPE слишком большой, ориентируйтесь на WAPE или MAPE по ненулевым значениям. Текущий non-zero MAPE: ${metricOrDash(nonZeroMape)}`
+                : `* If MAPE is extremely large, prefer WAPE or non-zero MAPE. Current non-zero MAPE: ${metricOrDash(nonZeroMape)}`}
             </p>
           </div>
         </>
