@@ -14,19 +14,39 @@ import {
 import { extractApiError } from "../api/client";
 import {
   buildPreflightArtifactDownloadUrl,
+  fetchPreflightActiveAlerts,
+  fetchPreflightAlertAudit,
+  fetchPreflightAlertHistory,
+  fetchPreflightAlertSilences,
   fetchLatestPreflight,
+  postPreflightAlertAcknowledge,
+  postPreflightAlertSilence,
+  postPreflightAlertSilenceExpire,
+  postPreflightAlertUnacknowledge,
+  fetchPreflightStats,
+  fetchPreflightTopRules,
+  fetchPreflightTrends,
   fetchPreflightRunDetails,
   fetchPreflightRuns,
   fetchPreflightSourceArtifacts,
   fetchPreflightSourceManifest,
   fetchPreflightSourceSemantic,
   fetchPreflightSourceValidation,
+  PreflightAnalyticsQueryParams,
+  PreflightActiveAlertsResponse,
+  PreflightAlertAuditResponse,
+  PreflightAlertHistoryResponse,
+  PreflightAlertSilencesResponse,
   PreflightManifestArtifactResponse,
+  PreflightMode,
   PreflightRunDetailResponse,
   PreflightRunSummary,
   PreflightSemanticArtifactResponse,
   PreflightSourceArtifactsResponse,
   PreflightSourceName,
+  PreflightStatsResponse,
+  PreflightTopRulesResponse,
+  PreflightTrendsResponse,
   PreflightValidationArtifactResponse,
 } from "../api/endpoints";
 import LoadingBlock from "../components/LoadingBlock";
@@ -36,6 +56,8 @@ import { useI18n } from "../lib/i18n";
 type SourceFilter = "all" | PreflightSourceName;
 type FinalStatusFilter = "all" | "PASS" | "WARN" | "FAIL";
 type TrendRow = { status: "PASS" | "WARN" | "FAIL"; count: number };
+type AnalyticsWindow = "7" | "30" | "custom";
+type AnalyticsModeFilter = "all" | Extract<PreflightMode, "off" | "report_only" | "enforce">;
 type ArtifactTab = "validation" | "semantic" | "manifest" | "artifacts";
 type TabLoadingState = Record<ArtifactTab, boolean>;
 type TabErrorState = Record<ArtifactTab, string>;
@@ -54,6 +76,24 @@ function formatTimestamp(value: string | null | undefined, localeTag: string): s
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
+  });
+}
+
+function formatTrendBucket(value: string, localeTag: string, bucket: "day" | "hour"): string {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  if (bucket === "hour") {
+    return parsed.toLocaleString(localeTag, {
+      month: "short",
+      day: "2-digit",
+      hour: "2-digit",
+    });
+  }
+  return parsed.toLocaleDateString(localeTag, {
+    month: "short",
+    day: "2-digit",
   });
 }
 
@@ -76,6 +116,22 @@ function truncateMiddle(value: string, maxLength = 72): string {
   }
   const keep = Math.floor((maxLength - 3) / 2);
   return `${value.slice(0, keep)}...${value.slice(value.length - keep)}`;
+}
+
+function formatMetricValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "-";
+  }
+  if (Number.isInteger(value)) {
+    return String(value);
+  }
+  return value.toFixed(4);
+}
+
+function addHoursIso(hours: number): string {
+  const value = new Date();
+  value.setHours(value.getHours() + hours);
+  return value.toISOString();
 }
 
 function sourceLabel(sourceName: string, locale: "en" | "ru"): string {
@@ -131,6 +187,30 @@ export default function PreflightDiagnostics() {
   const [detailsLoading, setDetailsLoading] = React.useState(false);
   const [detailsError, setDetailsError] = React.useState("");
 
+  const [analyticsSourceFilter, setAnalyticsSourceFilter] = React.useState<SourceFilter>("all");
+  const [analyticsModeFilter, setAnalyticsModeFilter] = React.useState<AnalyticsModeFilter>("all");
+  const [analyticsWindow, setAnalyticsWindow] = React.useState<AnalyticsWindow>("7");
+  const [analyticsDateFrom, setAnalyticsDateFrom] = React.useState("");
+  const [analyticsDateTo, setAnalyticsDateTo] = React.useState("");
+
+  const [stats, setStats] = React.useState<PreflightStatsResponse | null>(null);
+  const [trends, setTrends] = React.useState<PreflightTrendsResponse | null>(null);
+  const [topRules, setTopRules] = React.useState<PreflightTopRulesResponse | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = React.useState(false);
+  const [analyticsError, setAnalyticsError] = React.useState("");
+
+  const [activeAlerts, setActiveAlerts] = React.useState<PreflightActiveAlertsResponse | null>(null);
+  const [alertHistory, setAlertHistory] = React.useState<PreflightAlertHistoryResponse | null>(null);
+  const [alertSilences, setAlertSilences] = React.useState<PreflightAlertSilencesResponse | null>(null);
+  const [alertAudit, setAlertAudit] = React.useState<PreflightAlertAuditResponse | null>(null);
+  const [apiKeyInput, setApiKeyInput] = React.useState("");
+  const [apiKeyConfigured, setApiKeyConfigured] = React.useState(false);
+  const [authMessage, setAuthMessage] = React.useState("");
+  const [alertsActionError, setAlertsActionError] = React.useState("");
+  const [alertsActionLoading, setAlertsActionLoading] = React.useState<Record<string, boolean>>({});
+  const [alertsLoading, setAlertsLoading] = React.useState(false);
+  const [alertsError, setAlertsError] = React.useState("");
+
   const [selectedSourceName, setSelectedSourceName] = React.useState<PreflightSourceName | null>(null);
   const [activeArtifactTab, setActiveArtifactTab] = React.useState<ArtifactTab>("validation");
 
@@ -152,7 +232,84 @@ export default function PreflightDiagnostics() {
     artifacts: "",
   });
 
+  const isAuthError = React.useCallback((errorResponse: unknown): string | null => {
+    if (!axios.isAxiosError(errorResponse)) {
+      return null;
+    }
+
+    const statusCode = errorResponse.response?.status;
+    if (statusCode === 401) {
+      return locale === "ru"
+        ? "Доступ запрещен: API ключ отсутствует или недействителен."
+        : "Unauthorized: API key is missing or invalid.";
+    }
+    if (statusCode === 403) {
+      return locale === "ru"
+        ? "Недостаточно прав для этого действия. Проверьте scope API ключа."
+        : "Forbidden: this API key does not have the required diagnostics scope.";
+    }
+    return null;
+  }, [locale]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const storedKey = (window.sessionStorage.getItem("diagnostics_api_key") ?? "").trim();
+    if (storedKey) {
+      setApiKeyInput(storedKey);
+      setApiKeyConfigured(true);
+      setAuthMessage("");
+      return;
+    }
+
+    setApiKeyInput("");
+    setApiKeyConfigured(false);
+    setAuthMessage(
+      locale === "ru"
+        ? "Укажите X-API-Key для доступа к Diagnostics API."
+        : "Set X-API-Key to access protected diagnostics endpoints."
+    );
+  }, [locale]);
+
+  const handleSaveApiKey = React.useCallback(() => {
+    const normalized = apiKeyInput.trim();
+    if (!normalized) {
+      setApiKeyConfigured(false);
+      setAuthMessage(
+        locale === "ru" ? "API ключ не может быть пустым." : "API key cannot be empty."
+      );
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.sessionStorage.setItem("diagnostics_api_key", normalized);
+    }
+    setApiKeyInput(normalized);
+    setApiKeyConfigured(true);
+    setAuthMessage("");
+  }, [apiKeyInput, locale]);
+
+  const handleClearApiKey = React.useCallback(() => {
+    if (typeof window !== "undefined") {
+      window.sessionStorage.removeItem("diagnostics_api_key");
+    }
+
+    setApiKeyInput("");
+    setApiKeyConfigured(false);
+    setAuthMessage(
+      locale === "ru"
+        ? "API ключ очищен. Для продолжения введите новый ключ."
+        : "API key cleared. Enter a new key to continue."
+    );
+  }, [locale]);
+
   const loadLatest = React.useCallback(async () => {
+    if (!apiKeyConfigured) {
+      setLatest(null);
+      setLatestError("");
+      return;
+    }
     setLatestLoading(true);
     setLatestError("");
     try {
@@ -165,6 +322,10 @@ export default function PreflightDiagnostics() {
         setLatestError("");
         return;
       }
+      const authError = isAuthError(errorResponse);
+      if (authError) {
+        setAuthMessage(authError);
+      }
       setLatest(null);
       setLatestError(
         extractApiError(
@@ -175,9 +336,15 @@ export default function PreflightDiagnostics() {
     } finally {
       setLatestLoading(false);
     }
-  }, [locale, localeTag]);
+  }, [apiKeyConfigured, isAuthError, locale, localeTag]);
 
   const loadRuns = React.useCallback(async () => {
+    if (!apiKeyConfigured) {
+      setRuns([]);
+      setRunsError("");
+      setSelectedRunId(null);
+      return;
+    }
     setRunsLoading(true);
     setRunsError("");
     try {
@@ -194,6 +361,10 @@ export default function PreflightDiagnostics() {
       });
       setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
+      const authError = isAuthError(errorResponse);
+      if (authError) {
+        setAuthMessage(authError);
+      }
       setRuns([]);
       setSelectedRunId(null);
       setRunsError(
@@ -205,9 +376,14 @@ export default function PreflightDiagnostics() {
     } finally {
       setRunsLoading(false);
     }
-  }, [limit, locale, localeTag, sourceFilter]);
+  }, [apiKeyConfigured, isAuthError, limit, locale, localeTag, sourceFilter]);
 
   const loadSelectedRun = React.useCallback(async () => {
+    if (!apiKeyConfigured) {
+      setSelectedRun(null);
+      setDetailsError("");
+      return;
+    }
     if (!selectedRunId) {
       setSelectedRun(null);
       setDetailsError("");
@@ -219,6 +395,10 @@ export default function PreflightDiagnostics() {
       const response = await fetchPreflightRunDetails(selectedRunId);
       setSelectedRun(response);
     } catch (errorResponse) {
+      const authError = isAuthError(errorResponse);
+      if (authError) {
+        setAuthMessage(authError);
+      }
       setSelectedRun(null);
       setDetailsError(
         extractApiError(
@@ -229,7 +409,213 @@ export default function PreflightDiagnostics() {
     } finally {
       setDetailsLoading(false);
     }
-  }, [locale, selectedRunId]);
+  }, [apiKeyConfigured, isAuthError, locale, selectedRunId]);
+
+  const loadAnalytics = React.useCallback(async () => {
+    if (!apiKeyConfigured) {
+      setStats(null);
+      setTrends(null);
+      setTopRules(null);
+      setAnalyticsError("");
+      return;
+    }
+    setAnalyticsLoading(true);
+    setAnalyticsError("");
+
+    const params: PreflightAnalyticsQueryParams = {
+      ...(analyticsSourceFilter === "all" ? {} : { source_name: analyticsSourceFilter }),
+      ...(analyticsModeFilter === "all" ? {} : { mode: analyticsModeFilter }),
+    };
+
+    if (analyticsWindow === "custom") {
+      if (analyticsDateFrom) {
+        params.date_from = analyticsDateFrom;
+      }
+      if (analyticsDateTo) {
+        params.date_to = analyticsDateTo;
+      }
+    } else {
+      params.days = Number(analyticsWindow);
+    }
+
+    try {
+      const [statsResponse, trendsResponse, topRulesResponse] = await Promise.all([
+        fetchPreflightStats(params),
+        fetchPreflightTrends({ ...params, bucket: "day" }),
+        fetchPreflightTopRules({ ...params, limit: 10 }),
+      ]);
+      setStats(statsResponse);
+      setTrends(trendsResponse);
+      setTopRules(topRulesResponse);
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
+    } catch (errorResponse) {
+      const authError = isAuthError(errorResponse);
+      if (authError) {
+        setAuthMessage(authError);
+      }
+      setStats(null);
+      setTrends(null);
+      setTopRules(null);
+      setAnalyticsError(
+        extractApiError(
+          errorResponse,
+          locale === "ru"
+            ? "Не удалось загрузить агрегированную аналитику preflight."
+            : "Unable to load aggregated preflight analytics."
+        )
+      );
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [
+    analyticsDateFrom,
+    analyticsDateTo,
+    apiKeyConfigured,
+    analyticsModeFilter,
+    analyticsSourceFilter,
+    analyticsWindow,
+    isAuthError,
+    locale,
+    localeTag,
+  ]);
+
+  const loadAlerts = React.useCallback(async () => {
+    if (!apiKeyConfigured) {
+      setActiveAlerts(null);
+      setAlertHistory(null);
+      setAlertSilences(null);
+      setAlertAudit(null);
+      setAlertsError("");
+      return;
+    }
+    setAlertsLoading(true);
+    setAlertsError("");
+    try {
+      const [activeResponse, historyResponse, silencesResponse, auditResponse] = await Promise.all([
+        fetchPreflightActiveAlerts({ auto_evaluate: true }),
+        fetchPreflightAlertHistory({ limit: 20 }),
+        fetchPreflightAlertSilences({ limit: 50, include_expired: false }),
+        fetchPreflightAlertAudit({ limit: 50 }),
+      ]);
+      setActiveAlerts(activeResponse);
+      setAlertHistory(historyResponse);
+      setAlertSilences(silencesResponse);
+      setAlertAudit(auditResponse);
+      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
+    } catch (errorResponse) {
+      const authError = isAuthError(errorResponse);
+      if (authError) {
+        setAuthMessage(authError);
+      }
+      setActiveAlerts(null);
+      setAlertHistory(null);
+      setAlertSilences(null);
+      setAlertAudit(null);
+      setAlertsError(
+        extractApiError(
+          errorResponse,
+          locale === "ru" ? "Не удалось загрузить preflight alerts." : "Unable to load preflight alerts."
+        )
+      );
+    } finally {
+      setAlertsLoading(false);
+    }
+  }, [apiKeyConfigured, isAuthError, locale, localeTag]);
+
+  const runAlertAction = React.useCallback(
+    async (key: string, task: () => Promise<void>) => {
+      setAlertsActionError("");
+      setAlertsActionLoading((prev) => ({ ...prev, [key]: true }));
+      try {
+        await task();
+        await loadAlerts();
+      } catch (errorResponse) {
+        const authError = isAuthError(errorResponse);
+        if (authError) {
+          setAuthMessage(authError);
+        }
+        setAlertsActionError(
+          extractApiError(
+            errorResponse,
+            locale === "ru" ? "Не удалось выполнить действие по alert." : "Unable to apply alert action."
+          )
+        );
+      } finally {
+        setAlertsActionLoading((prev) => ({ ...prev, [key]: false }));
+      }
+    },
+    [isAuthError, loadAlerts, locale]
+  );
+
+  const handleAckAlert = React.useCallback(
+    async (alertId: string) => {
+      const note = window.prompt(
+        locale === "ru" ? "Комментарий ACK (опционально):" : "ACK note (optional):",
+        ""
+      );
+      if (note === null) {
+        return;
+      }
+      await runAlertAction(`ack:${alertId}`, async () => {
+        await postPreflightAlertAcknowledge(alertId, { note: note || undefined });
+      });
+    },
+    [locale, runAlertAction]
+  );
+
+  const handleUnackAlert = React.useCallback(
+    async (alertId: string) => {
+      await runAlertAction(`unack:${alertId}`, async () => {
+        await postPreflightAlertUnacknowledge(alertId);
+      });
+    },
+    [runAlertAction]
+  );
+
+  const handleSilenceAlert = React.useCallback(
+    async (payload: {
+      alertId: string;
+      policyId: string;
+      sourceName?: PreflightSourceName | null;
+      severity?: string | null;
+      ruleId?: string | null;
+      hours: number;
+    }) => {
+      const defaultReason =
+        locale === "ru"
+          ? `Временный silence (${payload.hours}ч) из Diagnostics UI`
+          : `Temporary silence (${payload.hours}h) from diagnostics UI`;
+      const reason = window.prompt(
+        locale === "ru" ? "Причина silence:" : "Silence reason:",
+        defaultReason
+      );
+      if (reason === null) {
+        return;
+      }
+      await runAlertAction(`silence:${payload.alertId}:${payload.hours}`, async () => {
+        await postPreflightAlertSilence(
+          {
+            ends_at: addHoursIso(payload.hours),
+            reason: reason || defaultReason,
+            policy_id: payload.policyId,
+            source_name: payload.sourceName ?? undefined,
+            severity: payload.severity ?? undefined,
+            rule_id: payload.ruleId ?? undefined,
+          },
+        );
+      });
+    },
+    [locale, runAlertAction]
+  );
+
+  const handleExpireSilence = React.useCallback(
+    async (silenceId: string) => {
+      await runAlertAction(`expire:${silenceId}`, async () => {
+        await postPreflightAlertSilenceExpire(silenceId);
+      });
+    },
+    [runAlertAction]
+  );
 
   React.useEffect(() => {
     void loadLatest();
@@ -238,6 +624,14 @@ export default function PreflightDiagnostics() {
   React.useEffect(() => {
     void loadRuns();
   }, [loadRuns]);
+
+  React.useEffect(() => {
+    void loadAnalytics();
+  }, [loadAnalytics]);
+
+  React.useEffect(() => {
+    void loadAlerts();
+  }, [loadAlerts]);
 
   React.useEffect(() => {
     void loadSelectedRun();
@@ -289,11 +683,25 @@ export default function PreflightDiagnostics() {
     FAIL: "var(--status-fail)",
   };
 
+  const analyticsTrendData = React.useMemo(() => {
+    if (!trends?.items) {
+      return [];
+    }
+    return trends.items.map((item) => ({
+      ...item,
+      bucket_label: formatTrendBucket(item.bucket_start, localeTag, trends.bucket),
+    }));
+  }, [localeTag, trends]);
+
   const refreshAll = React.useCallback(() => {
-    void Promise.all([loadLatest(), loadRuns(), loadSelectedRun()]);
-  }, [loadLatest, loadRuns, loadSelectedRun]);
+    void Promise.all([loadLatest(), loadRuns(), loadSelectedRun(), loadAnalytics(), loadAlerts()]);
+  }, [loadAlerts, loadAnalytics, loadLatest, loadRuns, loadSelectedRun]);
 
   const latestRecords = latest?.records ?? [];
+  const activeAlertItems = activeAlerts?.items ?? [];
+  const alertHistoryItems = alertHistory?.items ?? [];
+  const alertSilenceItems = alertSilences?.items ?? [];
+  const alertAuditItems = alertAudit?.items ?? [];
 
   const selectedRecord = React.useMemo(() => {
     if (!selectedRun || !selectedSourceName) {
@@ -310,7 +718,7 @@ export default function PreflightDiagnostics() {
   }, [selectedRun, selectedSourceName]);
 
   React.useEffect(() => {
-    if (!selectedRun || !selectedSourceName || !detailCacheKey) {
+    if (!apiKeyConfigured || !selectedRun || !selectedSourceName || !detailCacheKey) {
       return;
     }
 
@@ -387,6 +795,10 @@ export default function PreflightDiagnostics() {
         if (!active) {
           return;
         }
+        const authError = isAuthError(errorResponse);
+        if (authError) {
+          setAuthMessage(authError);
+        }
         setError(
           extractApiError(
             errorResponse,
@@ -407,8 +819,10 @@ export default function PreflightDiagnostics() {
     };
   }, [
     activeArtifactTab,
+    apiKeyConfigured,
     artifactsCache,
     detailCacheKey,
+    isAuthError,
     locale,
     manifestCache,
     selectedRun,
@@ -766,8 +1180,13 @@ export default function PreflightDiagnostics() {
         </div>
         <div className="inline-meta">
           <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
-          <button className="button primary" type="button" onClick={refreshAll} disabled={latestLoading || runsLoading || detailsLoading}>
-            {latestLoading || runsLoading || detailsLoading
+          <button
+            className="button primary"
+            type="button"
+            onClick={refreshAll}
+            disabled={latestLoading || runsLoading || detailsLoading || analyticsLoading || alertsLoading}
+          >
+            {latestLoading || runsLoading || detailsLoading || analyticsLoading || alertsLoading
               ? locale === "ru"
                 ? "Обновление..."
                 : "Refreshing..."
@@ -776,6 +1195,534 @@ export default function PreflightDiagnostics() {
                 : "Refresh"}
           </button>
         </div>
+      </div>
+
+      <div className="panel diagnostics-auth-panel">
+        <div className="panel-head">
+          <h3>{locale === "ru" ? "Diagnostics API Auth" : "Diagnostics API Auth"}</h3>
+          <p className="panel-subtitle">
+            {locale === "ru"
+              ? "Доступ к diagnostics endpoint через X-API-Key (сохраняется в sessionStorage)."
+              : "Access diagnostics endpoints with X-API-Key (stored in sessionStorage)."}
+          </p>
+        </div>
+        <div className="controls diagnostics-auth-controls">
+          <div className="field diagnostics-auth-key">
+            <label htmlFor="diagnostics-api-key">X-API-Key</label>
+            <input
+              id="diagnostics-api-key"
+              className="input"
+              type="password"
+              value={apiKeyInput}
+              onChange={(event) => setApiKeyInput(event.target.value)}
+              placeholder={locale === "ru" ? "Введите diagnostics API key" : "Enter diagnostics API key"}
+              autoComplete="off"
+              spellCheck={false}
+            />
+          </div>
+          <div className="diagnostics-auth-actions">
+            <button className="button primary" type="button" onClick={handleSaveApiKey}>
+              {locale === "ru" ? "Сохранить ключ" : "Save key"}
+            </button>
+            <button className="button ghost" type="button" onClick={handleClearApiKey}>
+              {locale === "ru" ? "Очистить" : "Clear"}
+            </button>
+          </div>
+        </div>
+        <p className="meta-text">
+          {locale === "ru" ? "Статус доступа" : "Access status"}:{" "}
+          <strong>{apiKeyConfigured ? (locale === "ru" ? "настроен" : "configured") : (locale === "ru" ? "отсутствует" : "missing")}</strong>
+        </p>
+        {authMessage ? <p className="error">{authMessage}</p> : null}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h3>{locale === "ru" ? "Active Alerts" : "Active Alerts"}</h3>
+          <p className="panel-subtitle">
+            {locale === "ru"
+              ? "Текущие policy-based оповещения по качеству preflight и история переходов."
+              : "Current policy-based quality alerts with pending/firing status and recent transition history."}
+          </p>
+        </div>
+
+        {alertsError && <p className="error">{alertsError}</p>}
+        {alertsActionError && <p className="error">{alertsActionError}</p>}
+
+        {alertsLoading && !activeAlerts && !alertHistory ? (
+          <LoadingBlock lines={4} className="loading-stack" />
+        ) : (
+          <div className="diagnostics-alerts-grid">
+            <div className="diagnostics-alerts-stack">
+              <div className="diagnostics-mini-grid">
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Активные alert" : "Active alerts"}</p>
+                  <p className="insight-value">{activeAlerts?.total_active ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Silences" : "Silences"}</p>
+                  <p className="insight-value">{alertSilenceItems.length}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Audit events" : "Audit events"}</p>
+                  <p className="insight-value">{alertAuditItems.length}</p>
+                </div>
+              </div>
+
+              {activeAlertItems.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="table diagnostics-alerts-table">
+                    <thead>
+                      <tr>
+                        <th>{locale === "ru" ? "Severity" : "Severity"}</th>
+                        <th>{locale === "ru" ? "Status" : "Status"}</th>
+                        <th>{locale === "ru" ? "Policy" : "Policy"}</th>
+                        <th>{locale === "ru" ? "Flags" : "Flags"}</th>
+                        <th>{locale === "ru" ? "Silence until" : "Silence until"}</th>
+                        <th>{locale === "ru" ? "Source" : "Source"}</th>
+                        <th>{locale === "ru" ? "Current/Threshold" : "Current/Threshold"}</th>
+                        <th>{locale === "ru" ? "Message" : "Message"}</th>
+                        <th>{locale === "ru" ? "Actions" : "Actions"}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {activeAlertItems.map((item) => {
+                        const ackBusy = Boolean(alertsActionLoading[`ack:${item.alert_id}`] || alertsActionLoading[`unack:${item.alert_id}`]);
+                        const silenceBusy = Boolean(alertsActionLoading[`silence:${item.alert_id}:1`] || alertsActionLoading[`silence:${item.alert_id}:24`]);
+                        const rowBusy = ackBusy || silenceBusy;
+                        return (
+                          <tr key={`active-alert-${item.alert_id}`}>
+                            <td><StatusBadge status={item.severity} /></td>
+                            <td><StatusBadge status={item.status} /></td>
+                            <td>
+                              <code className="mono-small">{item.policy_id}</code>
+                              {item.policy?.description ? (
+                                <p className="diagnostics-inline-note">{item.policy.description}</p>
+                              ) : null}
+                            </td>
+                            <td>
+                              <div className="diagnostics-flag-stack">
+                                {item.is_acknowledged ? <StatusBadge status="ACKED" /> : <span className="muted">ACK: -</span>}
+                                {item.is_silenced ? <StatusBadge status="SILENCED" /> : <span className="muted">SILENCE: -</span>}
+                              </div>
+                            </td>
+                            <td>{formatTimestamp(item.silence?.ends_at ?? null, localeTag)}</td>
+                            <td>{item.source_name ? sourceLabel(item.source_name, locale) : "-"}</td>
+                            <td className="mono-small">
+                              {formatMetricValue(item.current_value)} / {formatMetricValue(item.threshold)}
+                            </td>
+                            <td>{item.message}</td>
+                            <td>
+                              <div className="diagnostics-alert-actions">
+                                {item.is_acknowledged ? (
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => void handleUnackAlert(item.alert_id)}
+                                    disabled={rowBusy}
+                                  >
+                                    {locale === "ru" ? "Unack" : "Unack"}
+                                  </button>
+                                ) : (
+                                  <button
+                                    className="button ghost"
+                                    type="button"
+                                    onClick={() => void handleAckAlert(item.alert_id)}
+                                    disabled={rowBusy}
+                                  >
+                                    {locale === "ru" ? "Ack" : "Ack"}
+                                  </button>
+                                )}
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    void handleSilenceAlert({
+                                      alertId: item.alert_id,
+                                      policyId: item.policy_id,
+                                      sourceName: item.source_name ?? undefined,
+                                      severity: item.severity,
+                                      ruleId: item.policy?.rule_id ?? undefined,
+                                      hours: 1,
+                                    })
+                                  }
+                                  disabled={rowBusy}
+                                >
+                                  {locale === "ru" ? "Silence 1h" : "Silence 1h"}
+                                </button>
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() =>
+                                    void handleSilenceAlert({
+                                      alertId: item.alert_id,
+                                      policyId: item.policy_id,
+                                      sourceName: item.source_name ?? undefined,
+                                      severity: item.severity,
+                                      ruleId: item.policy?.rule_id ?? undefined,
+                                      hours: 24,
+                                    })
+                                  }
+                                  disabled={rowBusy}
+                                >
+                                  {locale === "ru" ? "Silence 24h" : "Silence 24h"}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted">
+                  {locale === "ru"
+                    ? "Активных alert нет (PENDING/FIRING)."
+                    : "No active alerts (PENDING/FIRING) for current diagnostics data."}
+                </p>
+              )}
+            </div>
+
+            <div className="diagnostics-alerts-right-stack">
+              <div className="panel diagnostics-embedded-panel">
+                <div className="panel-head">
+                  <h3>{locale === "ru" ? "Silences" : "Silences"}</h3>
+                  <p className="panel-subtitle">
+                    {locale === "ru" ? "Активные suppress-правила для alert." : "Active silence windows and matchers."}
+                  </p>
+                </div>
+                {alertSilenceItems.length > 0 ? (
+                  <div className="table-wrap">
+                    <table className="table diagnostics-alerts-table">
+                      <thead>
+                        <tr>
+                          <th>silence_id</th>
+                          <th>{locale === "ru" ? "Matchers" : "Matchers"}</th>
+                          <th>{locale === "ru" ? "Window" : "Window"}</th>
+                          <th>{locale === "ru" ? "Reason" : "Reason"}</th>
+                          <th>{locale === "ru" ? "Created by" : "Created by"}</th>
+                          <th>{locale === "ru" ? "Action" : "Action"}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {alertSilenceItems.map((silence) => (
+                          <tr key={`silence-${silence.silence_id}`}>
+                            <td><code className="mono-small">{silence.silence_id}</code></td>
+                            <td>
+                              <div className="diagnostics-chip-wrap">
+                                {silence.policy_id ? <span className="diagnostics-chip mono-small">policy:{silence.policy_id}</span> : null}
+                                {silence.source_name ? <span className="diagnostics-chip mono-small">source:{silence.source_name}</span> : null}
+                                {silence.severity ? <span className="diagnostics-chip mono-small">severity:{silence.severity}</span> : null}
+                                {silence.rule_id ? <span className="diagnostics-chip mono-small">rule:{silence.rule_id}</span> : null}
+                              </div>
+                            </td>
+                            <td className="mono-small">
+                              {formatTimestamp(silence.starts_at, localeTag)}<br />
+                              {formatTimestamp(silence.ends_at, localeTag)}
+                            </td>
+                            <td>{silence.reason || "-"}</td>
+                            <td><code className="mono-small">{silence.created_by}</code></td>
+                            <td>
+                              {silence.is_active ? (
+                                <button
+                                  className="button ghost"
+                                  type="button"
+                                  onClick={() => void handleExpireSilence(silence.silence_id)}
+                                  disabled={Boolean(alertsActionLoading[`expire:${silence.silence_id}`])}
+                                >
+                                  {locale === "ru" ? "Expire" : "Expire"}
+                                </button>
+                              ) : (
+                                <span className="muted">{locale === "ru" ? "Expired" : "Expired"}</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted">{locale === "ru" ? "Активные silences отсутствуют." : "No active silences."}</p>
+                )}
+              </div>
+
+              <div className="panel diagnostics-embedded-panel">
+                <div className="panel-head">
+                  <h3>{locale === "ru" ? "Alert Audit Trail" : "Alert Audit Trail"}</h3>
+                  <p className="panel-subtitle">
+                    {locale === "ru" ? "История действий ACK/SILENCE/EVALUATION." : "Audit stream for ACK/SILENCE/EVALUATION events."}
+                  </p>
+                </div>
+                {alertAuditItems.length > 0 ? (
+                  <div className="table-wrap">
+                    <table className="table diagnostics-alerts-table">
+                      <thead>
+                        <tr>
+                          <th>{locale === "ru" ? "Time" : "Time"}</th>
+                          <th>{locale === "ru" ? "Event" : "Event"}</th>
+                          <th>alert_id</th>
+                          <th>{locale === "ru" ? "Actor" : "Actor"}</th>
+                          <th>{locale === "ru" ? "Payload" : "Payload"}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {alertAuditItems.map((event) => (
+                          <tr key={`audit-${event.event_id}`}>
+                            <td>{formatTimestamp(event.event_at, localeTag)}</td>
+                            <td><StatusBadge status={event.event_type} /></td>
+                            <td><code className="mono-small">{event.alert_id}</code></td>
+                            <td><code className="mono-small">{event.actor}</code></td>
+                            <td>
+                              <details className="diagnostics-observed-block">
+                                <summary>{locale === "ru" ? "Показать" : "View"}</summary>
+                                <pre className="diagnostics-json-block">
+                                  {JSON.stringify(event.payload_json, null, 2)}
+                                </pre>
+                              </details>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted">{locale === "ru" ? "События аудита отсутствуют." : "No audit events yet."}</p>
+                )}
+              </div>
+
+              <div className="panel diagnostics-embedded-panel">
+                <div className="panel-head">
+                  <h3>{locale === "ru" ? "Recent Alert History" : "Recent Alert History"}</h3>
+                  <p className="panel-subtitle">
+                    {locale === "ru" ? "Последние переходы PENDING/FIRING/RESOLVED." : "Most recent alert status transitions."}
+                  </p>
+                </div>
+                {alertHistoryItems.length > 0 ? (
+                  <div className="table-wrap">
+                    <table className="table diagnostics-alerts-table">
+                      <thead>
+                        <tr>
+                          <th>{locale === "ru" ? "Evaluated" : "Evaluated"}</th>
+                          <th>{locale === "ru" ? "Policy" : "Policy"}</th>
+                          <th>{locale === "ru" ? "Status" : "Status"}</th>
+                          <th>{locale === "ru" ? "Severity" : "Severity"}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {alertHistoryItems.map((item) => (
+                          <tr key={`history-alert-${item.alert_id}`}>
+                            <td>{formatTimestamp(item.evaluated_at ?? null, localeTag)}</td>
+                            <td>
+                              <code className="mono-small">{item.policy_id}</code>
+                            </td>
+                            <td><StatusBadge status={item.status} /></td>
+                            <td><StatusBadge status={item.severity} /></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p className="muted">
+                    {locale === "ru" ? "История alert пока пуста." : "No alert history recorded yet."}
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <h3>{locale === "ru" ? "Quality Analytics" : "Quality Analytics"}</h3>
+          <p className="panel-subtitle">
+            {locale === "ru"
+              ? "Агрегированные метрики, тренд статусов и частота semantic-правил."
+              : "Aggregated quality counters, status trends, and semantic rule frequency over time."}
+          </p>
+        </div>
+
+        <div className="controls diagnostics-analytics-controls">
+          <div className="field">
+            <label htmlFor="analytics-source-filter">{locale === "ru" ? "Источник" : "Source"}</label>
+            <select
+              id="analytics-source-filter"
+              className="select"
+              value={analyticsSourceFilter}
+              onChange={(event) => setAnalyticsSourceFilter(event.target.value as SourceFilter)}
+            >
+              <option value="all">{locale === "ru" ? "Все" : "All"}</option>
+              <option value="train">Train</option>
+              <option value="store">Store</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="analytics-mode-filter">Mode</label>
+            <select
+              id="analytics-mode-filter"
+              className="select"
+              value={analyticsModeFilter}
+              onChange={(event) => setAnalyticsModeFilter(event.target.value as AnalyticsModeFilter)}
+            >
+              <option value="all">{locale === "ru" ? "Все" : "All"}</option>
+              <option value="off">off</option>
+              <option value="report_only">report_only</option>
+              <option value="enforce">enforce</option>
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor="analytics-window">{locale === "ru" ? "Период" : "Window"}</label>
+            <select
+              id="analytics-window"
+              className="select"
+              value={analyticsWindow}
+              onChange={(event) => setAnalyticsWindow(event.target.value as AnalyticsWindow)}
+            >
+              <option value="7">{locale === "ru" ? "Последние 7 дней" : "Last 7 days"}</option>
+              <option value="30">{locale === "ru" ? "Последние 30 дней" : "Last 30 days"}</option>
+              <option value="custom">{locale === "ru" ? "Кастомный период" : "Custom range"}</option>
+            </select>
+          </div>
+          {analyticsWindow === "custom" ? (
+            <>
+              <div className="field">
+                <label htmlFor="analytics-date-from">{locale === "ru" ? "Дата от" : "Date from"}</label>
+                <input
+                  id="analytics-date-from"
+                  className="input"
+                  type="date"
+                  value={analyticsDateFrom}
+                  onChange={(event) => setAnalyticsDateFrom(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="analytics-date-to">{locale === "ru" ? "Дата до" : "Date to"}</label>
+                <input
+                  id="analytics-date-to"
+                  className="input"
+                  type="date"
+                  value={analyticsDateTo}
+                  onChange={(event) => setAnalyticsDateTo(event.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        {analyticsError && <p className="error">{analyticsError}</p>}
+
+        {analyticsLoading && !stats && !trends && !topRules ? (
+          <LoadingBlock lines={5} className="loading-stack" />
+        ) : (
+          <div className="diagnostics-analytics-grid">
+            <div className="diagnostics-analytics-stack">
+              <div className="diagnostics-analytics-cards">
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Всего запусков" : "Total runs"}</p>
+                  <p className="insight-value">{stats?.total_runs ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">PASS</p>
+                  <p className="insight-value"><StatusBadge status="PASS" /> {stats?.pass_count ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">WARN</p>
+                  <p className="insight-value"><StatusBadge status="WARN" /> {stats?.warn_count ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">FAIL</p>
+                  <p className="insight-value"><StatusBadge status="FAIL" /> {stats?.fail_count ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Blocked" : "Blocked"}</p>
+                  <p className="insight-value">{stats?.blocked_count ?? 0}</p>
+                </div>
+                <div className="diagnostics-mini-card">
+                  <p className="insight-label">{locale === "ru" ? "Unified rate" : "Unified rate"}</p>
+                  <p className="insight-value">{stats ? `${(stats.used_unified_rate * 100).toFixed(1)}%` : "-"}</p>
+                </div>
+              </div>
+
+              <div className="panel diagnostics-embedded-panel">
+                <div className="panel-head">
+                  <h3>{locale === "ru" ? "Status Trend (Server)" : "Status Trend (Server)"}</h3>
+                  <p className="panel-subtitle">
+                    {locale === "ru"
+                      ? "Группировка по дням на стороне API."
+                      : "Server-side daily aggregation from diagnostics API."}
+                  </p>
+                </div>
+                {analyticsTrendData.length > 0 ? (
+                  <div style={{ width: "100%", height: 260 }}>
+                    <ResponsiveContainer>
+                      <BarChart data={analyticsTrendData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" />
+                        <XAxis dataKey="bucket_label" stroke="var(--chart-axis)" />
+                        <YAxis allowDecimals={false} stroke="var(--chart-axis)" />
+                        <Tooltip />
+                        <Bar dataKey="pass_count" stackId="status" fill="var(--status-pass)" name="PASS" />
+                        <Bar dataKey="warn_count" stackId="status" fill="var(--status-warn)" name="WARN" />
+                        <Bar dataKey="fail_count" stackId="status" fill="var(--status-fail)" name="FAIL" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                ) : (
+                  <p className="muted">
+                    {locale === "ru" ? "Нет данных тренда для выбранных фильтров." : "No trend data for selected filters."}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="panel diagnostics-embedded-panel">
+              <div className="panel-head">
+                <h3>{locale === "ru" ? "Top Quality Rules" : "Top Quality Rules"}</h3>
+                <p className="panel-subtitle">
+                  {locale === "ru"
+                    ? "Лидеры по WARN/FAIL из semantic правил."
+                    : "Most frequent WARN/FAIL semantic rules in selected window."}
+                </p>
+              </div>
+              {topRules?.items && topRules.items.length > 0 ? (
+                <div className="table-wrap">
+                  <table className="table diagnostics-rules-table">
+                    <thead>
+                      <tr>
+                        <th>rule_id</th>
+                        <th>rule_type</th>
+                        <th>severity</th>
+                        <th>WARN</th>
+                        <th>FAIL</th>
+                        <th>{locale === "ru" ? "Last seen" : "Last seen"}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {topRules.items.map((item) => (
+                        <tr key={`${item.rule_id}-${item.rule_type}-${item.severity}`}>
+                          <td>
+                            <code className="mono-small">{item.rule_id}</code>
+                            {item.sample_message ? <p className="diagnostics-inline-note">{item.sample_message}</p> : null}
+                          </td>
+                          <td><code className="mono-small">{item.rule_type}</code></td>
+                          <td><StatusBadge status={item.severity} /></td>
+                          <td>{item.warn_count}</td>
+                          <td>{item.fail_count}</td>
+                          <td>{formatTimestamp(item.last_seen_at ?? null, localeTag)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="muted">
+                  {locale === "ru" ? "Нет данных правил для выбранных фильтров." : "No top-rule data for selected filters."}
+                </p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="panel">

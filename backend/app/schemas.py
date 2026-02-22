@@ -289,3 +289,316 @@ class PreflightManifestArtifactResponse(BaseModel):
     output_column_count: int | None = None
     semantic_quality: dict[str, Any] | None = None
     artifact_path: str | None = None
+
+
+class PreflightAnalyticsFilters(BaseModel):
+    source_name: str | None = None
+    mode: str | None = None
+    final_status: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    days: int | None = None
+
+
+class PreflightStatsCounts(BaseModel):
+    total_runs: int
+    pass_count: int
+    warn_count: int
+    fail_count: int
+    blocked_count: int
+    used_unified_count: int
+    used_unified_rate: float
+
+
+class PreflightStatsResponse(PreflightStatsCounts):
+    by_source: dict[str, PreflightStatsCounts] = Field(default_factory=dict)
+    filters: PreflightAnalyticsFilters
+
+
+class PreflightTrendBucket(BaseModel):
+    bucket_start: datetime
+    pass_count: int
+    warn_count: int
+    fail_count: int
+    blocked_count: int
+
+
+class PreflightTrendsResponse(BaseModel):
+    bucket: Literal["day", "hour"]
+    items: list[PreflightTrendBucket] = Field(default_factory=list)
+    filters: PreflightAnalyticsFilters
+
+
+class PreflightTopRuleItem(BaseModel):
+    rule_id: str
+    rule_type: str
+    severity: str
+    warn_count: int
+    fail_count: int
+    last_seen_at: datetime | None = None
+    sample_message: str | None = None
+
+
+class PreflightTopRulesResponse(BaseModel):
+    items: list[PreflightTopRuleItem] = Field(default_factory=list)
+    limit: int
+    filters: PreflightAnalyticsFilters
+
+
+class PreflightAlertPolicyResponse(BaseModel):
+    id: str
+    enabled: bool
+    severity: str
+    source_name: str | None = None
+    window_days: int
+    metric_type: str
+    operator: str
+    threshold: float
+    pending_evaluations: int
+    description: str
+    rule_id: str | None = None
+
+
+class PreflightAlertSilenceResponse(BaseModel):
+    silence_id: str
+    policy_id: str | None = None
+    source_name: str | None = None
+    severity: str | None = None
+    rule_id: str | None = None
+    starts_at: datetime
+    ends_at: datetime
+    reason: str
+    created_by: str
+    created_at: datetime
+    expired_at: datetime | None = None
+    is_active: bool = False
+
+
+class PreflightAlertAcknowledgementResponse(BaseModel):
+    alert_id: str
+    acknowledged_by: str
+    acknowledged_at: datetime
+    note: str | None = None
+    cleared_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PreflightAlertItemResponse(BaseModel):
+    alert_id: str
+    policy_id: str
+    status: str
+    severity: str
+    source_name: str | None = None
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    resolved_at: datetime | None = None
+    current_value: float | None = None
+    threshold: float | None = None
+    message: str
+    evaluated_at: datetime | None = None
+    evaluation_context_json: dict[str, Any] = Field(default_factory=dict)
+    policy: PreflightAlertPolicyResponse | None = None
+    is_silenced: bool = False
+    silence: PreflightAlertSilenceResponse | None = None
+    is_acknowledged: bool = False
+    acknowledgement: PreflightAlertAcknowledgementResponse | None = None
+
+
+class PreflightActiveAlertsResponse(BaseModel):
+    evaluated_at: datetime
+    total_active: int
+    items: list[PreflightAlertItemResponse] = Field(default_factory=list)
+
+
+class PreflightAlertHistoryResponse(BaseModel):
+    limit: int
+    items: list[PreflightAlertItemResponse] = Field(default_factory=list)
+
+
+class PreflightAlertPoliciesResponse(BaseModel):
+    path: str
+    version: str
+    items: list[PreflightAlertPolicyResponse] = Field(default_factory=list)
+
+
+class PreflightAlertEvaluationResponse(BaseModel):
+    evaluated_at: datetime
+    total_policies: int
+    active_count: int
+    items: list[PreflightAlertItemResponse] = Field(default_factory=list)
+    policy_path: str
+    version: str
+
+
+class PreflightSilencesResponse(BaseModel):
+    limit: int
+    include_expired: bool = False
+    items: list[PreflightAlertSilenceResponse] = Field(default_factory=list)
+
+
+class PreflightCreateSilenceRequest(BaseModel):
+    starts_at: datetime | None = None
+    ends_at: datetime
+    reason: str = ""
+    policy_id: str | None = None
+    source_name: str | None = None
+    severity: str | None = None
+    rule_id: str | None = None
+
+
+class PreflightAcknowledgeAlertRequest(BaseModel):
+    note: str | None = None
+
+
+class PreflightAlertAuditEventResponse(BaseModel):
+    event_id: int
+    alert_id: str
+    event_type: str
+    actor: str
+    event_at: datetime
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreflightAlertAuditResponse(BaseModel):
+    limit: int
+    items: list[PreflightAlertAuditEventResponse] = Field(default_factory=list)
+
+
+class PreflightNotificationOutboxItemResponse(BaseModel):
+    id: str
+    event_id: str | None = None
+    delivery_id: str | None = None
+    replayed_from_id: str | None = None
+    event_type: str
+    alert_id: str
+    policy_id: str
+    severity: str | None = None
+    source_name: str | None = None
+    payload_json: dict[str, Any] = Field(default_factory=dict)
+    channel_type: str
+    channel_target: str
+    status: str
+    attempt_count: int
+    max_attempts: int
+    next_retry_at: datetime | None = None
+    last_error: str | None = None
+    last_http_status: int | None = None
+    last_error_code: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    sent_at: datetime | None = None
+
+
+class PreflightNotificationOutboxResponse(BaseModel):
+    limit: int
+    items: list[PreflightNotificationOutboxItemResponse] = Field(default_factory=list)
+
+
+class PreflightNotificationDispatchResponse(BaseModel):
+    actor: str
+    dispatched_at: datetime
+    processed_count: int
+    sent_count: int
+    retrying_count: int
+    dead_count: int
+    failed_count: int
+
+
+class PreflightNotificationReplayResponse(BaseModel):
+    actor: str
+    replayed_count: int
+    items: list[PreflightNotificationOutboxItemResponse] = Field(default_factory=list)
+
+
+class PreflightNotificationAnalyticsFilters(BaseModel):
+    days: int | None = None
+    event_type: str | None = None
+    channel_target: str | None = None
+    status: str | None = None
+    attempt_status: str | None = None
+    alert_id: str | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+
+
+class PreflightNotificationStatsResponse(BaseModel):
+    filters: PreflightNotificationAnalyticsFilters
+    total_events: int
+    sent_count: int
+    retry_count: int
+    dead_count: int
+    replay_count: int
+    pending_count: int
+    success_rate: float
+    avg_delivery_latency_ms: float | None = None
+    p95_delivery_latency_ms: float | None = None
+    oldest_pending_age_seconds: int | None = None
+    runtime_observability: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreflightNotificationTrendBucket(BaseModel):
+    bucket_start: datetime
+    sent_count: int
+    retry_count: int
+    dead_count: int
+    replay_count: int
+    avg_delivery_latency_ms: float | None = None
+
+
+class PreflightNotificationTrendsResponse(BaseModel):
+    bucket: Literal["day", "hour"]
+    filters: PreflightNotificationAnalyticsFilters
+    items: list[PreflightNotificationTrendBucket] = Field(default_factory=list)
+
+
+class PreflightNotificationChannelErrorCode(BaseModel):
+    error_code: str
+    count: int
+
+
+class PreflightNotificationChannelSummary(BaseModel):
+    channel_target: str
+    sent_count: int
+    retry_count: int
+    dead_count: int
+    pending_count: int
+    replay_count: int
+    success_rate: float
+    avg_delivery_latency_ms: float | None = None
+    last_sent_at: datetime | None = None
+    last_error_at: datetime | None = None
+    top_error_codes: list[PreflightNotificationChannelErrorCode] = Field(default_factory=list)
+
+
+class PreflightNotificationChannelsResponse(BaseModel):
+    filters: PreflightNotificationAnalyticsFilters
+    items: list[PreflightNotificationChannelSummary] = Field(default_factory=list)
+
+
+class PreflightNotificationAttemptItemResponse(BaseModel):
+    attempt_id: str
+    outbox_item_id: str
+    event_id: str | None = None
+    delivery_id: str | None = None
+    replayed_from_id: str | None = None
+    channel_type: str
+    channel_target: str
+    event_type: str
+    alert_id: str
+    policy_id: str
+    source_name: str | None = None
+    attempt_number: int
+    attempt_status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
+    http_status: int | None = None
+    error_code: str | None = None
+    error_message_safe: str | None = None
+    created_at: datetime
+
+
+class PreflightNotificationAttemptsResponse(BaseModel):
+    limit: int
+    filters: PreflightNotificationAnalyticsFilters
+    items: list[PreflightNotificationAttemptItemResponse] = Field(default_factory=list)

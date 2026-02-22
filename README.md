@@ -259,7 +259,7 @@ If you prefer manual commands, follow module READMEs:
 - If forecast fails, rerun model training and ensure `ml/artifacts/model.joblib` exists.
 - If model diagnostics endpoint fails, ensure `ml/artifacts/model_metadata.json` exists.
 
-## Preflight Diagnostics API (Milestone 5)
+## Preflight Diagnostics API (Milestone 9)
 
 Purpose:
 - persist preflight execution outcomes (train/store) in a run registry
@@ -270,21 +270,142 @@ Endpoints:
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}`
 - `GET /api/v1/diagnostics/preflight/latest`
 - `GET /api/v1/diagnostics/preflight/latest/{source_name}` (`train` or `store`)
+- `GET /api/v1/diagnostics/preflight/stats`
+- `GET /api/v1/diagnostics/preflight/trends`
+- `GET /api/v1/diagnostics/preflight/rules/top`
+- `GET /api/v1/diagnostics/preflight/alerts/active` (`auto_evaluate=false` by default)
+- `GET /api/v1/diagnostics/preflight/alerts/history?limit=50`
+- `GET /api/v1/diagnostics/preflight/alerts/policies`
+- `GET /api/v1/diagnostics/preflight/alerts/silences`
+- `POST /api/v1/diagnostics/preflight/alerts/silences`
+- `POST /api/v1/diagnostics/preflight/alerts/silences/{silence_id}/expire`
+- `POST /api/v1/diagnostics/preflight/alerts/{alert_id}/ack`
+- `POST /api/v1/diagnostics/preflight/alerts/{alert_id}/unack`
+- `GET /api/v1/diagnostics/preflight/alerts/audit`
+- `POST /api/v1/diagnostics/preflight/alerts/evaluate` (local demo only, requires `PREFLIGHT_ALERTS_ALLOW_EVALUATE=1`)
+- `GET /api/v1/diagnostics/preflight/notifications/outbox`
+- `GET /api/v1/diagnostics/preflight/notifications/history`
+- `GET /api/v1/diagnostics/preflight/notifications/stats`
+- `GET /api/v1/diagnostics/preflight/notifications/trends`
+- `GET /api/v1/diagnostics/preflight/notifications/channels`
+- `GET /api/v1/diagnostics/preflight/notifications/attempts`
+- `GET /api/v1/diagnostics/preflight/notifications/attempts/{attempt_id}`
+- `GET /api/v1/diagnostics/metrics` (Prometheus/OpenMetrics text format)
+- `POST /api/v1/diagnostics/preflight/notifications/dispatch` (admin scope)
+- `POST /api/v1/diagnostics/preflight/notifications/outbox/{id}/replay` (admin scope)
+- `POST /api/v1/diagnostics/preflight/notifications/outbox/replay-dead` (admin scope)
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/artifacts`
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation`
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/semantic`
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/manifest`
 - `GET /api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/download/{artifact_type}`
 
+Alert policy config:
+- `config/preflight_alert_policies.yaml`
+- Supported policy metrics: `fail_rate`, `blocked_count`, `fail_count`, `unified_usage_rate`, `top_rule_fail_count`, `semantic_rule_fail_count`
+- Alert lifecycle: `OK -> PENDING -> FIRING -> RESOLVED`
+- Diagnostics auth: endpoints require `X-API-Key` and RBAC scopes (`diagnostics:read`, `diagnostics:operate`, `diagnostics:admin`)
+- Background scheduler:
+  - `PREFLIGHT_ALERTS_SCHEDULER_ENABLED=1`
+  - `PREFLIGHT_ALERTS_SCHEDULER_INTERVAL_SECONDS=60`
+  - `PREFLIGHT_ALERTS_SCHEDULER_AUTO_START=1`
+  - Notification dispatch scheduler:
+    - `PREFLIGHT_NOTIFICATIONS_SCHEDULER_ENABLED=1`
+    - `PREFLIGHT_NOTIFICATIONS_INTERVAL_SECONDS=30`
+    - `PREFLIGHT_NOTIFICATIONS_DISPATCH_BATCH_SIZE=50`
+  - Optional lease: `PREFLIGHT_ALERTS_SCHEDULER_LEASE_ENABLED=1`, `PREFLIGHT_ALERTS_SCHEDULER_LEASE_NAME=preflight_alerts_scheduler`
+  - Scheduler actor in audit trail: `system:scheduler`
+- Notification channels config:
+  - `config/preflight_notification_channels.yaml`
+  - `PREFLIGHT_ALERTS_WEBHOOK_URL` (secret URL from env)
+  - `PREFLIGHT_ALERTS_WEBHOOK_SIGNING_SECRET` (optional HMAC secret)
+- Outbox delivery metadata:
+  - `event_id` (stable transition event id for idempotency)
+  - `delivery_id` (unique delivery attempt id)
+  - `replayed_from_id` (lineage for replayed deliveries)
+  - `last_http_status`, `last_error_code` (latest delivery diagnostics)
+- Notification data model:
+  - Outbox = delivery queue and current item state (pending/retrying/sent/dead)
+  - Attempt ledger = immutable attempt-level telemetry (`STARTED/SENT/RETRY/DEAD/FAILED`)
+  - Retry counts and delivery latency analytics are sourced from attempt ledger (exact, no heuristics)
+- Notification delivery health indicators:
+  - `success_rate`, `dead_count`, `retry_count`, `pending_count`
+  - latency (`avg_delivery_latency_ms`, `p95_delivery_latency_ms`)
+  - oldest pending age and per-channel error distributions
+- Local demo migration:
+  - `DIAGNOSTICS_AUTH_ENABLED=0` temporarily disables diagnostics key checks
+  - `DIAGNOSTICS_AUTH_ALLOW_LEGACY_ACTOR=1` enables legacy fallback identity when key is missing
+  - `DIAGNOSTICS_METRICS_AUTH_DISABLED=1` temporarily disables auth for `GET /api/v1/diagnostics/metrics`
+
+Prometheus/OpenMetrics export:
+- endpoint: `GET /api/v1/diagnostics/metrics`
+- content type: `text/plain; version=0.0.4`
+- key metric families:
+  - preflight: `preflight_runs_total`, `preflight_blocked_total`, `preflight_latest_run_timestamp_seconds`
+  - alerts: `preflight_alerts_active`, `preflight_alert_transitions_total`, `preflight_alert_silences_active`
+  - notifications (exact attempt telemetry): `preflight_notifications_attempts_total`, `preflight_notifications_delivery_latency_ms_bucket|sum|count`
+  - queue/scheduler health: `preflight_notifications_outbox_pending`, `preflight_notifications_outbox_dead`, `preflight_notifications_outbox_oldest_pending_age_seconds`, `preflight_alerts_scheduler_last_tick_timestamp_seconds`, `preflight_notifications_scheduler_last_tick_timestamp_seconds`
+  - safety: `preflight_metrics_render_errors_total`, `preflight_notifications_dispatch_errors_total`
+- security note: metrics endpoint requires diagnostics API key with `diagnostics:read` scope unless `DIAGNOSTICS_METRICS_AUTH_DISABLED=1`.
+
+Create a diagnostics API key (printed once, hash stored in DB):
+
+```bash
+python scripts/create_diagnostics_api_key.py \
+  --name "local_demo_client" \
+  --scopes "diagnostics:read,diagnostics:operate,diagnostics:admin"
+```
+
 Example:
 
 ```bash
-curl -s "http://localhost:8000/api/v1/diagnostics/preflight/runs?limit=5" | jq
-curl -s "http://localhost:8000/api/v1/diagnostics/preflight/latest" | jq
-curl -s "http://localhost:8000/api/v1/diagnostics/preflight/latest/train" | jq
-curl -s "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/semantic" | jq
-curl -L "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/download/manifest" -o manifest.json
+export DIAG_API_KEY="<paste_generated_key_once>"
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/runs?limit=5" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/latest" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/latest/train" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/stats?days=30&source_name=train" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/trends?days=30&bucket=day" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/rules/top?days=30&limit=10" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/alerts/active?auto_evaluate=true" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/alerts/history?limit=20" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/alerts/policies" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/alerts/silences" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/alerts/audit?limit=20" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/outbox?limit=20" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/history?limit=20" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/stats?days=30" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/trends?days=30&bucket=day" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/channels?days=30" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/attempts?days=30&limit=50" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/attempts/<attempt_id>" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/metrics"
+curl -X POST -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/dispatch?limit=20" | jq
+curl -X POST -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/outbox/<outbox_id>/replay" | jq
+curl -X POST -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/notifications/outbox/replay-dead?limit=20" | jq
+curl -X POST "http://localhost:8000/api/v1/diagnostics/preflight/alerts/blocked_runs_any/ack" \
+  -H "X-API-Key: ${DIAG_API_KEY}" -H "Content-Type: application/json" -d '{"note":"triage"}' | jq
+PREFLIGHT_ALERTS_ALLOW_EVALUATE=1 curl -X POST "http://localhost:8000/api/v1/diagnostics/preflight/alerts/evaluate" \
+  -H "X-API-Key: ${DIAG_API_KEY}" | jq
+curl -s -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/semantic" | jq
+curl -L -H "X-API-Key: ${DIAG_API_KEY}" "http://localhost:8000/api/v1/diagnostics/preflight/runs/<run_id>/sources/train/download/manifest" -o manifest.json
 ```
+
+Webhook receiver quickstart:
+```bash
+# Use webhook.site or a local tunnel URL and keep it in env (not committed).
+export PREFLIGHT_ALERTS_WEBHOOK_URL="https://webhook.site/<your-id>"
+```
+
+Webhook header contract and verification:
+- Headers: `X-Preflight-Delivery-Id`, `X-Preflight-Event-Id`, `X-Preflight-Timestamp`, optional `X-Preflight-Signature`.
+- Signature uses HMAC SHA-256 over `<timestamp>.<raw_json_payload>`.
+- Receiver should validate timestamp freshness and signature, then deduplicate by `event_id`.
+
+Notification troubleshooting workflow:
+1. Check `/notifications/stats` for dead/retry spikes and pending age.
+2. Open `/notifications/history`, pick an outbox item, then inspect `/notifications/attempts` (or `/attempts/{attempt_id}`) for exact per-attempt status/error/latency.
+3. Replay failed/dead deliveries (`/notifications/outbox/{id}/replay` or `/notifications/outbox/replay-dead`).
+4. Re-check `/notifications/stats` and `/notifications/trends` to confirm delivery recovery.
 
 Sample response (list item):
 
@@ -305,3 +426,82 @@ Sample response (list item):
   "manifest_path": ".../manifest.json"
 }
 ```
+
+## Monitoring Stack (Milestone 18)
+
+Repo now includes local Prometheus + Grafana integration for diagnostics metrics.
+
+Monitoring files:
+- `docker-compose.monitoring.yml`
+- `monitoring/prometheus/prometheus.yml`
+- `monitoring/prometheus/rules/preflight_platform_alerts.yml`
+- `monitoring/grafana/provisioning/datasources/prometheus.yml`
+- `monitoring/grafana/provisioning/dashboards/dashboards.yml`
+- `monitoring/grafana/dashboards/preflight_platform_overview.json`
+- `monitoring/README.md`
+
+Local run:
+1. Start backend on `http://localhost:8000`.
+2. For local scrape without API-key headers in Prometheus, set:
+```bash
+export DIAGNOSTICS_METRICS_AUTH_DISABLED=1
+```
+3. Start monitoring stack:
+```bash
+docker compose -f docker-compose.monitoring.yml up -d
+```
+
+Open:
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+
+Dashboard panels include:
+- preflight runs by final status
+- active alerts by severity/status
+- notification attempts by attempt status
+- notification delivery latency p95
+- outbox pending/dead + oldest pending age
+- scheduler last tick age (alerts + notifications)
+
+Security note:
+- local demo can disable metrics auth with `DIAGNOSTICS_METRICS_AUTH_DISABLED=1`
+- production should keep metrics auth enabled and scrape through protected/internal path
+
+## Alertmanager Integration (Milestone 19)
+
+Monitoring stack now includes Alertmanager routing/inhibition for Prometheus rule alerts.
+
+Added files/config:
+- `monitoring/alertmanager/alertmanager.yml`
+- updated `monitoring/prometheus/prometheus.yml` (`alerting` targets)
+- updated `docker-compose.monitoring.yml` (`alertmanager` + local webhook sink)
+
+Run locally:
+```bash
+# backend in another terminal (with metrics auth disabled for local scrape)
+export DIAGNOSTICS_METRICS_AUTH_DISABLED=1
+
+# monitoring stack
+
+docker compose -f docker-compose.monitoring.yml up -d
+```
+
+Endpoints:
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3000`
+- Alertmanager: `http://localhost:9093`
+
+Two alerting layers (important):
+1. Internal app alerting:
+   - preflight alerts service (policies, pending/firing/resolved)
+   - diagnostics alert APIs, silences/acks/audit
+   - notification outbox + retries/replay
+2. External monitoring alerting:
+   - Prometheus metrics rules
+   - Alertmanager grouping/dedup/routing/inhibition
+   - monitoring-oriented incident visibility
+
+Production note:
+- keep diagnostics metrics auth enabled in production
+- use internal/protected scrape and routing paths
+- do not commit receiver secrets/tokens to repo configs

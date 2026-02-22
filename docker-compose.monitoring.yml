@@ -1,0 +1,65 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.53.2
+    container_name: preflight_prometheus
+    restart: unless-stopped
+    depends_on:
+      - alertmanager
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.enable-lifecycle
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: preflight_alertmanager
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+      - --web.listen-address=:9093
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./monitoring/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager_data:/alertmanager
+
+  alert_webhook_sink:
+    image: mendhak/http-https-echo:33
+    container_name: preflight_alert_webhook_sink
+    restart: unless-stopped
+    environment:
+      HTTP_PORT: 8080
+    expose:
+      - "8080"
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    container_name: preflight_grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  prometheus_data:
+  grafana_data:
+  alertmanager_data:

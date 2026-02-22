@@ -166,6 +166,7 @@ export type ChatResponse = {
 
 export type PreflightSourceName = "train" | "store";
 export type PreflightStatus = "PASS" | "WARN" | "FAIL" | "SKIPPED" | string;
+export type PreflightMode = "off" | "report_only" | "enforce" | string;
 
 export type PreflightRunSummary = {
   run_id: string;
@@ -272,6 +273,191 @@ export type PreflightManifestArtifactResponse = {
   output_column_count?: number | null;
   semantic_quality?: Record<string, unknown> | null;
   artifact_path?: string | null;
+};
+
+export type PreflightAnalyticsFilters = {
+  source_name?: PreflightSourceName | null;
+  mode?: PreflightMode | null;
+  final_status?: "PASS" | "WARN" | "FAIL" | null;
+  date_from?: string | null;
+  date_to?: string | null;
+  days?: number | null;
+};
+
+export type PreflightStatsCounts = {
+  total_runs: number;
+  pass_count: number;
+  warn_count: number;
+  fail_count: number;
+  blocked_count: number;
+  used_unified_count: number;
+  used_unified_rate: number;
+};
+
+export type PreflightStatsResponse = PreflightStatsCounts & {
+  by_source: Record<string, PreflightStatsCounts>;
+  filters: PreflightAnalyticsFilters;
+};
+
+export type PreflightTrendBucket = {
+  bucket_start: string;
+  pass_count: number;
+  warn_count: number;
+  fail_count: number;
+  blocked_count: number;
+};
+
+export type PreflightTrendsResponse = {
+  bucket: "day" | "hour";
+  items: PreflightTrendBucket[];
+  filters: PreflightAnalyticsFilters;
+};
+
+export type PreflightTopRuleItem = {
+  rule_id: string;
+  rule_type: string;
+  severity: string;
+  warn_count: number;
+  fail_count: number;
+  last_seen_at?: string | null;
+  sample_message?: string | null;
+};
+
+export type PreflightTopRulesResponse = {
+  items: PreflightTopRuleItem[];
+  limit: number;
+  filters: PreflightAnalyticsFilters;
+};
+
+export type PreflightAlertSeverity = "LOW" | "MEDIUM" | "HIGH" | string;
+export type PreflightAlertStatus = "OK" | "PENDING" | "FIRING" | "RESOLVED" | string;
+
+export type PreflightAlertPolicy = {
+  id: string;
+  enabled: boolean;
+  severity: PreflightAlertSeverity;
+  source_name?: PreflightSourceName | null;
+  window_days: number;
+  metric_type: string;
+  operator: string;
+  threshold: number;
+  pending_evaluations: number;
+  description: string;
+  rule_id?: string | null;
+};
+
+export type PreflightAlertSilence = {
+  silence_id: string;
+  policy_id?: string | null;
+  source_name?: PreflightSourceName | null;
+  severity?: PreflightAlertSeverity | null;
+  rule_id?: string | null;
+  starts_at: string;
+  ends_at: string;
+  reason: string;
+  created_by: string;
+  created_at: string;
+  expired_at?: string | null;
+  is_active: boolean;
+};
+
+export type PreflightAlertAcknowledgement = {
+  alert_id: string;
+  acknowledged_by: string;
+  acknowledged_at: string;
+  note?: string | null;
+  cleared_at?: string | null;
+  updated_at?: string | null;
+};
+
+export type PreflightAlertItem = {
+  alert_id: string;
+  policy_id: string;
+  status: PreflightAlertStatus;
+  severity: PreflightAlertSeverity;
+  source_name?: PreflightSourceName | null;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  resolved_at?: string | null;
+  current_value?: number | null;
+  threshold?: number | null;
+  message: string;
+  evaluated_at?: string | null;
+  evaluation_context_json: Record<string, unknown>;
+  policy?: PreflightAlertPolicy | null;
+  is_silenced?: boolean;
+  silence?: PreflightAlertSilence | null;
+  is_acknowledged?: boolean;
+  acknowledgement?: PreflightAlertAcknowledgement | null;
+};
+
+export type PreflightActiveAlertsResponse = {
+  evaluated_at: string;
+  total_active: number;
+  items: PreflightAlertItem[];
+};
+
+export type PreflightAlertHistoryResponse = {
+  limit: number;
+  items: PreflightAlertItem[];
+};
+
+export type PreflightAlertPoliciesResponse = {
+  path: string;
+  version: string;
+  items: PreflightAlertPolicy[];
+};
+
+export type PreflightAlertEvaluationResponse = {
+  evaluated_at: string;
+  total_policies: number;
+  active_count: number;
+  items: PreflightAlertItem[];
+  policy_path: string;
+  version: string;
+};
+
+export type PreflightAlertSilencesResponse = {
+  limit: number;
+  include_expired: boolean;
+  items: PreflightAlertSilence[];
+};
+
+export type PreflightCreateSilenceRequest = {
+  starts_at?: string;
+  ends_at: string;
+  reason?: string;
+  policy_id?: string;
+  source_name?: PreflightSourceName;
+  severity?: PreflightAlertSeverity;
+  rule_id?: string;
+};
+
+export type PreflightAcknowledgeAlertRequest = {
+  note?: string;
+};
+
+export type PreflightAlertAuditEvent = {
+  event_id: number;
+  alert_id: string;
+  event_type: string;
+  actor: string;
+  event_at: string;
+  payload_json: Record<string, unknown>;
+};
+
+export type PreflightAlertAuditResponse = {
+  limit: number;
+  items: PreflightAlertAuditEvent[];
+};
+
+export type PreflightAnalyticsQueryParams = {
+  source_name?: PreflightSourceName;
+  mode?: "off" | "report_only" | "enforce";
+  final_status?: "PASS" | "WARN" | "FAIL";
+  date_from?: string;
+  date_to?: string;
+  days?: number;
 };
 
 export async function fetchStores(): Promise<Store[]> {
@@ -403,6 +589,112 @@ export async function fetchPreflightSourceManifest(
   const { data } = await apiClient.get<PreflightManifestArtifactResponse>(
     `/diagnostics/preflight/runs/${encodeURIComponent(runId)}/sources/${sourceName}/manifest`
   );
+  return data;
+}
+
+export async function fetchPreflightStats(
+  params: PreflightAnalyticsQueryParams
+): Promise<PreflightStatsResponse> {
+  const { data } = await apiClient.get<PreflightStatsResponse>("/diagnostics/preflight/stats", { params });
+  return data;
+}
+
+export async function fetchPreflightTrends(
+  params: PreflightAnalyticsQueryParams & { bucket?: "day" | "hour" }
+): Promise<PreflightTrendsResponse> {
+  const { data } = await apiClient.get<PreflightTrendsResponse>("/diagnostics/preflight/trends", { params });
+  return data;
+}
+
+export async function fetchPreflightTopRules(
+  params: PreflightAnalyticsQueryParams & { limit?: number }
+): Promise<PreflightTopRulesResponse> {
+  const { data } = await apiClient.get<PreflightTopRulesResponse>("/diagnostics/preflight/rules/top", { params });
+  return data;
+}
+
+export async function fetchPreflightActiveAlerts(params?: {
+  auto_evaluate?: boolean;
+}): Promise<PreflightActiveAlertsResponse> {
+  const { data } = await apiClient.get<PreflightActiveAlertsResponse>("/diagnostics/preflight/alerts/active", {
+    params,
+  });
+  return data;
+}
+
+export async function fetchPreflightAlertHistory(params?: {
+  limit?: number;
+}): Promise<PreflightAlertHistoryResponse> {
+  const { data } = await apiClient.get<PreflightAlertHistoryResponse>("/diagnostics/preflight/alerts/history", {
+    params,
+  });
+  return data;
+}
+
+export async function fetchPreflightAlertPolicies(): Promise<PreflightAlertPoliciesResponse> {
+  const { data } = await apiClient.get<PreflightAlertPoliciesResponse>("/diagnostics/preflight/alerts/policies");
+  return data;
+}
+
+export async function fetchPreflightAlertSilences(params?: {
+  limit?: number;
+  include_expired?: boolean;
+}): Promise<PreflightAlertSilencesResponse> {
+  const { data } = await apiClient.get<PreflightAlertSilencesResponse>("/diagnostics/preflight/alerts/silences", {
+    params,
+  });
+  return data;
+}
+
+export async function postPreflightAlertSilence(
+  payload: PreflightCreateSilenceRequest
+): Promise<PreflightAlertSilence> {
+  const { data } = await apiClient.post<PreflightAlertSilence>("/diagnostics/preflight/alerts/silences", payload);
+  return data;
+}
+
+export async function postPreflightAlertSilenceExpire(
+  silenceId: string
+): Promise<PreflightAlertSilence> {
+  const { data } = await apiClient.post<PreflightAlertSilence>(
+    `/diagnostics/preflight/alerts/silences/${encodeURIComponent(silenceId)}/expire`,
+    {}
+  );
+  return data;
+}
+
+export async function postPreflightAlertAcknowledge(
+  alertId: string,
+  payload: PreflightAcknowledgeAlertRequest
+): Promise<PreflightAlertAcknowledgement> {
+  const { data } = await apiClient.post<PreflightAlertAcknowledgement>(
+    `/diagnostics/preflight/alerts/${encodeURIComponent(alertId)}/ack`,
+    payload
+  );
+  return data;
+}
+
+export async function postPreflightAlertUnacknowledge(
+  alertId: string
+): Promise<PreflightAlertAcknowledgement> {
+  const { data } = await apiClient.post<PreflightAlertAcknowledgement>(
+    `/diagnostics/preflight/alerts/${encodeURIComponent(alertId)}/unack`,
+    {}
+  );
+  return data;
+}
+
+export async function fetchPreflightAlertAudit(params?: {
+  limit?: number;
+}): Promise<PreflightAlertAuditResponse> {
+  const { data } = await apiClient.get<PreflightAlertAuditResponse>("/diagnostics/preflight/alerts/audit", {
+    params,
+  });
+  return data;
+}
+
+export async function triggerPreflightAlertEvaluation(): Promise<PreflightAlertEvaluationResponse> {
+  const { data } = await apiClient.post<PreflightAlertEvaluationResponse>("/diagnostics/preflight/alerts/evaluate", {});
   return data;
 }
 

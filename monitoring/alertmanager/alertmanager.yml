@@ -1,0 +1,53 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: default-null
+  group_by: [alertname, severity, subsystem, source_name]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 2h
+  routes:
+    - matchers:
+        - severity="high"
+      receiver: webhook-high
+    - matchers:
+        - severity="medium"
+      receiver: webhook-medium
+    - matchers:
+        - severity="low"
+      receiver: webhook-low
+
+receivers:
+  - name: default-null
+
+  - name: webhook-high
+    webhook_configs:
+      - url: http://alert_webhook_sink:8080/alerts/high
+        send_resolved: true
+        max_alerts: 0
+
+  - name: webhook-medium
+    webhook_configs:
+      - url: http://alert_webhook_sink:8080/alerts/medium
+        send_resolved: true
+        max_alerts: 0
+
+  - name: webhook-low
+    webhook_configs:
+      - url: http://alert_webhook_sink:8080/alerts/low
+        send_resolved: true
+        max_alerts: 0
+
+inhibit_rules:
+  - source_matchers:
+      - severity="high"
+    target_matchers:
+      - severity=~"medium|low"
+    equal: [subsystem, source_name]
+
+  - source_matchers:
+      - severity="medium"
+    target_matchers:
+      - severity="low"
+    equal: [subsystem, source_name]

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections import defaultdict
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from typing import Literal
@@ -12,7 +14,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.etl.preflight_registry import get_latest_preflight, get_preflight_run, list_preflight_runs
+from src.etl.preflight_registry import (
+    get_latest_preflight,
+    get_preflight_run,
+    list_preflight_runs,
+    query_preflight_runs,
+)
 
 PreflightArtifactType = Literal["validation", "semantic", "manifest", "preflight", "unified_csv"]
 ARTIFACT_TYPES: tuple[PreflightArtifactType, ...] = ("validation", "semantic", "manifest", "preflight", "unified_csv")
@@ -35,6 +42,205 @@ class DiagnosticsAccessError(PermissionError):
 
 class DiagnosticsPayloadError(ValueError):
     """Raised when artifact payload cannot be parsed as expected."""
+
+
+SUPPORTED_SOURCES = {"train", "store"}
+SUPPORTED_MODES = {"off", "report_only", "enforce"}
+SUPPORTED_FINAL_STATUSES = {"PASS", "WARN", "FAIL"}
+
+
+def _normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _normalize_source_filter(value: str | None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered not in SUPPORTED_SOURCES:
+        raise DiagnosticsPayloadError(
+            f"Unsupported source_name '{value}'. Expected one of {sorted(SUPPORTED_SOURCES)}"
+        )
+    return lowered
+
+
+def _normalize_mode_filter(value: str | None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    lowered = normalized.lower()
+    if lowered not in SUPPORTED_MODES:
+        raise DiagnosticsPayloadError(
+            f"Unsupported mode '{value}'. Expected one of {sorted(SUPPORTED_MODES)}"
+        )
+    return lowered
+
+
+def _normalize_final_status_filter(value: str | None) -> str | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+    upper = normalized.upper()
+    if upper not in SUPPORTED_FINAL_STATUSES:
+        raise DiagnosticsPayloadError(
+            f"Unsupported final_status '{value}'. Expected one of {sorted(SUPPORTED_FINAL_STATUSES)}"
+        )
+    return upper
+
+
+def _parse_iso_date_or_datetime(
+    value: str | None,
+    *,
+    field_name: str,
+    end_of_day_if_date: bool,
+) -> datetime | None:
+    normalized = _normalize_optional_text(value)
+    if normalized is None:
+        return None
+
+    date_only = normalized[:10]
+    if len(normalized) == 10 and normalized[4] == "-" and normalized[7] == "-":
+        try:
+            parsed_date = date.fromisoformat(date_only)
+        except ValueError as exc:
+            raise DiagnosticsPayloadError(
+                f"Invalid {field_name} '{value}'. Expected ISO date or datetime."
+            ) from exc
+        parsed_time = time.max if end_of_day_if_date else time.min
+        return datetime.combine(parsed_date, parsed_time, tzinfo=timezone.utc)
+
+    candidate = normalized.replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise DiagnosticsPayloadError(
+            f"Invalid {field_name} '{value}'. Expected ISO date or datetime."
+        ) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _resolve_date_window(
+    *,
+    date_from: str | None,
+    date_to: str | None,
+    days: int | None,
+) -> tuple[datetime | None, datetime | None]:
+    parsed_from = _parse_iso_date_or_datetime(
+        date_from,
+        field_name="date_from",
+        end_of_day_if_date=False,
+    )
+    parsed_to = _parse_iso_date_or_datetime(
+        date_to,
+        field_name="date_to",
+        end_of_day_if_date=True,
+    )
+
+    if parsed_from is not None or parsed_to is not None:
+        if days is not None:
+            raise DiagnosticsPayloadError("Use either days or explicit date_from/date_to filters, not both.")
+    elif days is not None:
+        if days < 1 or days > 3650:
+            raise DiagnosticsPayloadError("days must be between 1 and 3650.")
+        parsed_to = datetime.now(timezone.utc)
+        parsed_from = parsed_to - timedelta(days=int(days))
+
+    if parsed_from is not None and parsed_to is not None and parsed_from > parsed_to:
+        raise DiagnosticsPayloadError("date_from must be earlier than or equal to date_to.")
+    return parsed_from, parsed_to
+
+
+def _parse_created_at(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    if isinstance(value, str):
+        candidate = value.strip().replace("Z", "+00:00")
+        if not candidate:
+            return None
+        try:
+            parsed = datetime.fromisoformat(candidate)
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    return None
+
+
+def _isoformat_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _coerce_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "t"}
+    return False
+
+
+def _record_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
+    total_runs = len(records)
+    pass_count = sum(1 for record in records if _normalize_status(record.get("final_status")) == "PASS")
+    warn_count = sum(1 for record in records if _normalize_status(record.get("final_status")) == "WARN")
+    fail_count = sum(1 for record in records if _normalize_status(record.get("final_status")) == "FAIL")
+    blocked_count = sum(1 for record in records if _coerce_bool(record.get("blocked")))
+    used_unified_count = sum(1 for record in records if _coerce_bool(record.get("used_unified")))
+    used_unified_rate = float(used_unified_count / total_runs) if total_runs > 0 else 0.0
+    return {
+        "total_runs": int(total_runs),
+        "pass_count": int(pass_count),
+        "warn_count": int(warn_count),
+        "fail_count": int(fail_count),
+        "blocked_count": int(blocked_count),
+        "used_unified_count": int(used_unified_count),
+        "used_unified_rate": used_unified_rate,
+    }
+
+
+def _query_filtered_records(
+    *,
+    source_name: str | None = None,
+    mode: str | None = None,
+    final_status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    days: int | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    normalized_source = _normalize_source_filter(source_name)
+    normalized_mode = _normalize_mode_filter(mode)
+    normalized_final_status = _normalize_final_status_filter(final_status)
+    resolved_from, resolved_to = _resolve_date_window(date_from=date_from, date_to=date_to, days=days)
+
+    records = query_preflight_runs(
+        source_name=normalized_source,
+        mode=normalized_mode,
+        final_status=normalized_final_status,
+        date_from=resolved_from,
+        date_to=resolved_to,
+        limit=None,
+    )
+
+    filters = {
+        "source_name": normalized_source,
+        "mode": normalized_mode,
+        "final_status": normalized_final_status,
+        "date_from": _isoformat_utc(resolved_from) if resolved_from is not None else None,
+        "date_to": _isoformat_utc(resolved_to) if resolved_to is not None else None,
+        "days": days if resolved_from is not None and resolved_to is not None and days is not None else None,
+    }
+    return records, filters
 
 
 def _compact_record(payload: dict[str, Any]) -> dict[str, Any]:
@@ -536,4 +742,208 @@ def get_preflight_source_artifact_download(
         "path": str(path),
         "file_name": path.name,
         "content_type": ARTIFACT_CONTENT_TYPES[artifact_type],
+    }
+
+
+def get_preflight_stats(
+    *,
+    source_name: str | None = None,
+    mode: str | None = None,
+    final_status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    days: int | None = None,
+) -> dict[str, Any]:
+    records, filters = _query_filtered_records(
+        source_name=source_name,
+        mode=mode,
+        final_status=final_status,
+        date_from=date_from,
+        date_to=date_to,
+        days=days,
+    )
+
+    total_counts = _record_counts(records)
+    grouped: dict[str, list[dict[str, Any]]] = {"train": [], "store": []}
+    for record in records:
+        source = str(record.get("source_name", "")).strip().lower()
+        if source in grouped:
+            grouped[source].append(record)
+
+    by_source = {source: _record_counts(group_records) for source, group_records in grouped.items() if group_records}
+
+    return {
+        **total_counts,
+        "by_source": by_source,
+        "filters": filters,
+    }
+
+
+def get_preflight_trends(
+    *,
+    source_name: str | None = None,
+    mode: str | None = None,
+    final_status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    days: int | None = None,
+    bucket: str = "day",
+) -> dict[str, Any]:
+    normalized_bucket = str(bucket).strip().lower()
+    if normalized_bucket not in {"day", "hour"}:
+        raise DiagnosticsPayloadError("bucket must be one of ['day', 'hour'].")
+
+    records, filters = _query_filtered_records(
+        source_name=source_name,
+        mode=mode,
+        final_status=final_status,
+        date_from=date_from,
+        date_to=date_to,
+        days=days,
+    )
+
+    aggregates: dict[datetime, dict[str, int]] = defaultdict(
+        lambda: {"pass_count": 0, "warn_count": 0, "fail_count": 0, "blocked_count": 0}
+    )
+
+    for record in records:
+        created_at = _parse_created_at(record.get("created_at"))
+        if created_at is None:
+            continue
+
+        if normalized_bucket == "hour":
+            bucket_start = created_at.replace(minute=0, second=0, microsecond=0)
+        else:
+            bucket_start = created_at.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        status = _normalize_status(record.get("final_status"))
+        if status == "PASS":
+            aggregates[bucket_start]["pass_count"] += 1
+        elif status == "WARN":
+            aggregates[bucket_start]["warn_count"] += 1
+        elif status == "FAIL":
+            aggregates[bucket_start]["fail_count"] += 1
+
+        if _coerce_bool(record.get("blocked")):
+            aggregates[bucket_start]["blocked_count"] += 1
+
+    items = [
+        {
+            "bucket_start": _isoformat_utc(bucket_start),
+            "pass_count": int(values["pass_count"]),
+            "warn_count": int(values["warn_count"]),
+            "fail_count": int(values["fail_count"]),
+            "blocked_count": int(values["blocked_count"]),
+        }
+        for bucket_start, values in sorted(aggregates.items(), key=lambda item: item[0])
+    ]
+
+    return {
+        "bucket": normalized_bucket,
+        "items": items,
+        "filters": filters,
+    }
+
+
+def get_preflight_top_rules(
+    *,
+    source_name: str | None = None,
+    mode: str | None = None,
+    final_status: str | None = None,
+    date_from: str | None = None,
+    date_to: str | None = None,
+    days: int | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    normalized_limit = max(1, min(int(limit), 100))
+    records, filters = _query_filtered_records(
+        source_name=source_name,
+        mode=mode,
+        final_status=final_status,
+        date_from=date_from,
+        date_to=date_to,
+        days=days,
+    )
+
+    aggregates: dict[tuple[str, str, str], dict[str, Any]] = {}
+
+    for record in records:
+        created_at = _parse_created_at(record.get("created_at"))
+        try:
+            semantic_payload, _ = _load_semantic_payload_with_fallback(record)
+        except DiagnosticsNotFoundError:
+            continue
+
+        normalized_semantic = _normalize_semantic_payload(semantic_payload)
+        rules = normalized_semantic.get("rules", [])
+        if not isinstance(rules, list):
+            continue
+
+        for rule in rules:
+            if not isinstance(rule, dict):
+                continue
+
+            status = _normalize_status(rule.get("status"))
+            if status not in {"WARN", "FAIL"}:
+                continue
+
+            rule_id = str(rule.get("rule_id", "unknown_rule"))
+            rule_type = str(rule.get("rule_type", "unknown"))
+            severity = _normalize_status(rule.get("severity"), fallback="WARN")
+            key = (rule_id, rule_type, severity)
+
+            if key not in aggregates:
+                aggregates[key] = {
+                    "rule_id": rule_id,
+                    "rule_type": rule_type,
+                    "severity": severity,
+                    "warn_count": 0,
+                    "fail_count": 0,
+                    "last_seen_at": None,
+                    "sample_message": str(rule.get("message", "")) or None,
+                }
+
+            if status == "WARN":
+                aggregates[key]["warn_count"] += 1
+            else:
+                aggregates[key]["fail_count"] += 1
+
+            if not aggregates[key].get("sample_message"):
+                aggregates[key]["sample_message"] = str(rule.get("message", "")) or None
+
+            if created_at is not None:
+                current_last_seen = aggregates[key].get("last_seen_at")
+                if current_last_seen is None or created_at > current_last_seen:
+                    aggregates[key]["last_seen_at"] = created_at
+
+    ranked = sorted(
+        aggregates.values(),
+        key=lambda item: (
+            int(item.get("fail_count", 0)),
+            int(item.get("warn_count", 0)),
+            item.get("last_seen_at") or datetime.min.replace(tzinfo=timezone.utc),
+            str(item.get("rule_id", "")),
+        ),
+        reverse=True,
+    )
+
+    items: list[dict[str, Any]] = []
+    for item in ranked[:normalized_limit]:
+        last_seen_value = item.get("last_seen_at")
+        items.append(
+            {
+                "rule_id": str(item.get("rule_id")),
+                "rule_type": str(item.get("rule_type")),
+                "severity": str(item.get("severity")),
+                "warn_count": int(item.get("warn_count", 0)),
+                "fail_count": int(item.get("fail_count", 0)),
+                "last_seen_at": _isoformat_utc(last_seen_value) if isinstance(last_seen_value, datetime) else None,
+                "sample_message": item.get("sample_message"),
+            }
+        )
+
+    return {
+        "items": items,
+        "limit": normalized_limit,
+        "filters": filters,
     }

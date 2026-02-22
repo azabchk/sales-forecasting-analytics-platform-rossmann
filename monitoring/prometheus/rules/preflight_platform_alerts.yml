@@ -1,0 +1,80 @@
+groups:
+  - name: preflight-platform-alerts
+    interval: 30s
+    rules:
+      - alert: PreflightBlockedRunsDetected
+        expr: increase(preflight_blocked_total[30m]) > 0
+        for: 2m
+        labels:
+          severity: high
+          subsystem: preflight-platform
+        annotations:
+          summary: "Blocked preflight runs detected"
+          description: "At least one new blocked preflight run was recorded in the last 30 minutes."
+          runbook_hint: "Open /diagnostics/preflight/runs and inspect failed enforce-mode sources + semantic reports."
+
+      - alert: NotificationDeadAttemptsDetected
+        expr: increase(preflight_notifications_attempts_total{attempt_status="DEAD"}[15m]) > 0
+        for: 2m
+        labels:
+          severity: high
+          subsystem: preflight-platform
+        annotations:
+          summary: "Notification dead attempts detected"
+          description: "Webhook delivery attempts reached DEAD status in the last 15 minutes."
+          runbook_hint: "Inspect /diagnostics/preflight/notifications/history and replay failed outbox items."
+
+      - alert: NotificationOutboxBacklogHigh
+        expr: preflight_notifications_outbox_pending > 20
+        for: 10m
+        labels:
+          severity: medium
+          subsystem: preflight-platform
+        annotations:
+          summary: "Notification pending backlog is high"
+          description: "Pending/retrying notification outbox items exceeded 20 for at least 10 minutes."
+          runbook_hint: "Check dispatcher health, channel endpoint status, and pending item age metric."
+
+      - alert: AlertsSchedulerStale
+        expr: preflight_alerts_scheduler_last_tick_timestamp_seconds > 0 and (time() - preflight_alerts_scheduler_last_tick_timestamp_seconds) > 180
+        for: 3m
+        labels:
+          severity: high
+          subsystem: preflight-platform
+        annotations:
+          summary: "Alerts scheduler heartbeat is stale"
+          description: "No alert-evaluation scheduler tick heartbeat for more than 3 minutes."
+          runbook_hint: "Verify backend scheduler env flags and inspect backend scheduler logs."
+
+      - alert: NotificationsSchedulerStale
+        expr: preflight_notifications_scheduler_last_tick_timestamp_seconds > 0 and (time() - preflight_notifications_scheduler_last_tick_timestamp_seconds) > 180
+        for: 3m
+        labels:
+          severity: high
+          subsystem: preflight-platform
+        annotations:
+          summary: "Notifications scheduler heartbeat is stale"
+          description: "No notification-dispatch scheduler tick heartbeat for more than 3 minutes."
+          runbook_hint: "Check notification scheduler config and backend logs, then run manual dispatch if needed."
+
+      - alert: NotificationDeliveryLatencyP95High
+        expr: histogram_quantile(0.95, sum by (le) (rate(preflight_notifications_delivery_latency_ms_bucket[10m]))) > 5000
+        for: 10m
+        labels:
+          severity: medium
+          subsystem: preflight-platform
+        annotations:
+          summary: "Notification delivery latency p95 is high"
+          description: "95th percentile notification delivery latency exceeded 5000 ms for 10 minutes."
+          runbook_hint: "Validate webhook receiver responsiveness and network connectivity for configured channels."
+
+      - alert: HighSeverityPreflightAlertsActive
+        expr: sum(preflight_alerts_active{severity="HIGH",status=~"PENDING|FIRING"}) > 0
+        for: 20m
+        labels:
+          severity: high
+          subsystem: preflight-platform
+        annotations:
+          summary: "HIGH severity preflight alerts remain active"
+          description: "At least one HIGH severity preflight alert has remained active for over 20 minutes."
+          runbook_hint: "Review active alerts, acknowledge/silence appropriately, and remediate root cause in input quality flow."

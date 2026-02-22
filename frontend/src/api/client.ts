@@ -7,6 +7,19 @@ export const apiClient = axios.create({
   timeout: 15000,
 });
 
+apiClient.interceptors.request.use((config) => {
+  if (typeof window !== "undefined") {
+    const apiKey = window.sessionStorage.getItem("diagnostics_api_key");
+    const normalized = typeof apiKey === "string" ? apiKey.trim() : "";
+    const requestPath = String(config.url ?? "");
+    if (normalized && requestPath.includes("/diagnostics/")) {
+      config.headers = config.headers ?? {};
+      config.headers["X-API-Key"] = normalized;
+    }
+  }
+  return config;
+});
+
 export function extractApiError(error: unknown, fallbackMessage: string): string {
   if (!axios.isAxiosError(error)) {
     return fallbackMessage;

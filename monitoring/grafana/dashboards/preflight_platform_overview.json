@@ -1,0 +1,187 @@
+{
+  "id": null,
+  "uid": "preflight-platform-overview",
+  "title": "Preflight Platform Overview",
+  "tags": ["preflight", "diagnostics", "alerts", "notifications"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "refresh": "15s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Preflight Runs by Final Status",
+      "id": 1,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (final_status) (preflight_runs_total)",
+          "legendFormat": "{{final_status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Active Alerts by Severity/Status",
+      "id": 2,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (severity, status) (preflight_alerts_active)",
+          "legendFormat": "{{severity}}/{{status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Notification Attempts by Attempt Status (rate)",
+      "id": 3,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (attempt_status) (rate(preflight_notifications_attempts_total[5m]))",
+          "legendFormat": "{{attempt_status}}"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Notification Delivery Latency (p95, ms)",
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(preflight_notifications_delivery_latency_ms_bucket[5m])))",
+          "legendFormat": "p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Outbox Pending",
+      "id": 5,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 0, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "preflight_notifications_outbox_pending"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Outbox Dead",
+      "id": 6,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 4, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "preflight_notifications_outbox_dead"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Oldest Pending Age (s)",
+      "id": 7,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 8, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "preflight_notifications_outbox_oldest_pending_age_seconds"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Alerts Scheduler Tick Age (s)",
+      "id": 8,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 12, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - preflight_alerts_scheduler_last_tick_timestamp_seconds"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Notifications Scheduler Tick Age (s)",
+      "id": 9,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 16, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - preflight_notifications_scheduler_last_tick_timestamp_seconds"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Metrics Render Errors",
+      "id": 10,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": { "h": 6, "w": 4, "x": 20, "y": 16 },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "preflight_metrics_render_errors_total"
+        }
+      ]
+    }
+  ]
+}

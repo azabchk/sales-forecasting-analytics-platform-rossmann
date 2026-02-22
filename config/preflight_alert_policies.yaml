@@ -1,0 +1,44 @@
+version: v1
+policies:
+  - id: train_fail_rate_7d
+    enabled: true
+    severity: HIGH
+    source_name: train
+    window_days: 7
+    metric_type: fail_rate
+    operator: ">"
+    threshold: 0.15
+    pending_evaluations: 2
+    description: "Train preflight fail rate exceeded 15% over the last 7 days."
+
+  - id: blocked_runs_any_7d
+    enabled: true
+    severity: HIGH
+    window_days: 7
+    metric_type: blocked_count
+    operator: ">="
+    threshold: 1
+    pending_evaluations: 1
+    description: "At least one blocked preflight run detected in the last 7 days."
+
+  - id: unified_usage_low_30d
+    enabled: true
+    severity: MEDIUM
+    window_days: 30
+    metric_type: unified_usage_rate
+    operator: "<"
+    threshold: 0.6
+    pending_evaluations: 2
+    description: "Unified input usage fell below 60% in the last 30 days."
+
+  - id: day_of_week_rule_fail_7d
+    enabled: true
+    severity: MEDIUM
+    source_name: train
+    window_days: 7
+    metric_type: semantic_rule_fail_count
+    rule_id: day_of_week_allowed
+    operator: ">"
+    threshold: 0
+    pending_evaluations: 1
+    description: "day_of_week semantic rule is failing in train inputs."

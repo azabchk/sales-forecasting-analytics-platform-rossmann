@@ -706,6 +706,73 @@ a:focus-visible {
   align-items: start;
 }
 
+.diagnostics-analytics-controls {
+  margin-bottom: 12px;
+}
+
+.diagnostics-analytics-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 2fr 1.2fr;
+  align-items: start;
+}
+
+.diagnostics-alerts-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 2fr 1.2fr;
+  align-items: start;
+}
+
+.diagnostics-alert-controls {
+  margin-bottom: 10px;
+}
+
+.diagnostics-alert-actor {
+  min-width: 260px;
+}
+
+.diagnostics-auth-controls {
+  margin-bottom: 8px;
+  align-items: end;
+}
+
+.diagnostics-auth-key {
+  min-width: min(460px, 100%);
+}
+
+.diagnostics-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.diagnostics-alerts-stack {
+  display: grid;
+  gap: 10px;
+}
+
+.diagnostics-alerts-right-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-analytics-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostics-analytics-cards {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.diagnostics-embedded-panel {
+  margin: 0;
+  box-shadow: none;
+}
+
 .diagnostics-left-stack {
   display: grid;
   gap: 12px;
@@ -841,6 +908,13 @@ a:focus-visible {
   font-weight: 800;
 }
 
+.diagnostics-inline-note {
+  margin: 5px 0 0;
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.3;
+}
+
 .diagnostics-list {
   margin: 0;
   padding-left: 18px;
@@ -864,6 +938,21 @@ a:focus-visible {
 
 .diagnostics-rules-table td details {
   max-width: 220px;
+}
+
+.diagnostics-alerts-table td {
+  vertical-align: top;
+}
+
+.diagnostics-flag-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.diagnostics-alert-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .diagnostics-observed-block summary {
@@ -1117,6 +1206,18 @@ a:focus-visible {
     grid-template-columns: 1fr;
   }
 
+  .diagnostics-analytics-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnostics-alerts-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .diagnostics-analytics-cards {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .diagnostics-drill-controls {
     grid-template-columns: 1fr;
   }
@@ -1157,6 +1258,8 @@ a:focus-visible {
   .controls-grid-portfolio,
   .diagnostics-overview-grid,
   .diagnostics-source-grid,
+  .diagnostics-analytics-cards,
+  .diagnostics-alerts-grid,
   .diagnostics-mini-grid,
   .diagnostics-checks-grid,
   .diagnostics-list-grid {

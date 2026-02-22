@@ -1,6 +1,7 @@
 ﻿import logging
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,6 +9,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings
 from app.routers import chat, diagnostics, forecast, health, kpi, sales, stores, system
+from app.services.preflight_alerts_scheduler import PreflightAlertsScheduler
 
 settings = get_settings()
 
@@ -17,10 +19,27 @@ logging.basicConfig(
 )
 logger = logging.getLogger("app.api")
 
+_preflight_alerts_scheduler: PreflightAlertsScheduler | None = None
+
+
+@asynccontextmanager
+async def app_lifespan(_: FastAPI):
+    global _preflight_alerts_scheduler
+    _preflight_alerts_scheduler = PreflightAlertsScheduler.from_env()
+    _preflight_alerts_scheduler.start()
+    try:
+        yield
+    finally:
+        if _preflight_alerts_scheduler is not None:
+            _preflight_alerts_scheduler.shutdown()
+            _preflight_alerts_scheduler = None
+
+
 app = FastAPI(
     title="Rossmann Sales Forecast API",
     description="API for KPI analytics, timeseries exploration, and sales forecasting",
     version="2.0.0",
+    lifespan=app_lifespan,
 )
 
 app.add_middleware(
@@ -30,7 +49,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 
 @app.middleware("http")
 async def observability_middleware(request: Request, call_next):

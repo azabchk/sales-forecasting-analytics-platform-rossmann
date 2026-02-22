@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import app
+from backend.tests.diagnostics_auth_helpers import create_auth_headers
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
@@ -54,7 +55,7 @@ def _insert_registry_record(
     )
 
 
-def _prepare_env(monkeypatch, tmp_path: Path) -> tuple[str, Path]:
+def _prepare_env(monkeypatch, tmp_path: Path) -> tuple[str, Path, dict[str, str]]:
     db_path = tmp_path / "diagnostics_artifacts.db"
     database_url = f"sqlite+pysqlite:///{db_path.resolve()}"
     artifact_root = (tmp_path / "preflight_root").resolve()
@@ -62,11 +63,17 @@ def _prepare_env(monkeypatch, tmp_path: Path) -> tuple[str, Path]:
 
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("PREFLIGHT_ARTIFACT_ROOT", str(artifact_root))
-    return database_url, artifact_root
+    monkeypatch.setenv("DIAGNOSTICS_AUTH_ENABLED", "1")
+    headers, _, _ = create_auth_headers(
+        database_url=database_url,
+        scopes=["diagnostics:read"],
+        name="diagnostics-reader",
+    )
+    return database_url, artifact_root, headers
 
 
 def test_artifact_endpoints_return_validation_semantic_manifest(monkeypatch, tmp_path: Path):
-    database_url, artifact_root = _prepare_env(monkeypatch, tmp_path)
+    database_url, artifact_root, headers = _prepare_env(monkeypatch, tmp_path)
     client = TestClient(app)
 
     run_id = "run_artifacts_ok"
@@ -151,7 +158,10 @@ def test_artifact_endpoints_return_validation_semantic_manifest(monkeypatch, tmp
         database_url=database_url,
     )
 
-    artifacts_response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/artifacts")
+    artifacts_response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/artifacts",
+        headers=headers,
+    )
     assert artifacts_response.status_code == 200
     artifacts_payload = artifacts_response.json()
     assert artifacts_payload["run_id"] == run_id
@@ -159,34 +169,44 @@ def test_artifact_endpoints_return_validation_semantic_manifest(monkeypatch, tmp
     assert len(artifacts_payload["artifacts"]) == 5
     assert any(item["artifact_type"] == "semantic" and item["available"] is True for item in artifacts_payload["artifacts"])
 
-    validation_response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation")
+    validation_response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation",
+        headers=headers,
+    )
     assert validation_response.status_code == 200
     validation_payload = validation_response.json()
     assert validation_payload["status"] == "PASS"
     assert validation_payload["checks"]["required_columns"] == "PASS"
 
-    semantic_response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/semantic")
+    semantic_response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/semantic",
+        headers=headers,
+    )
     assert semantic_response.status_code == 200
     semantic_payload = semantic_response.json()
     assert semantic_payload["status"] == "WARN"
     assert semantic_payload["counts"]["warned"] == 1
     assert semantic_payload["rules"][0]["rule_id"] == "customers_null_ratio"
 
-    manifest_response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/manifest")
+    manifest_response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/manifest",
+        headers=headers,
+    )
     assert manifest_response.status_code == 200
     manifest_payload = manifest_response.json()
     assert manifest_payload["profile"] == "rossmann_train"
     assert manifest_payload["renamed_columns"]["Store"] == "store_id"
 
     download_response = client.get(
-        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/download/manifest"
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/download/manifest",
+        headers=headers,
     )
     assert download_response.status_code == 200
     assert download_response.headers["content-type"].startswith("application/json")
 
 
 def test_missing_artifact_returns_404(monkeypatch, tmp_path: Path):
-    database_url, artifact_root = _prepare_env(monkeypatch, tmp_path)
+    database_url, artifact_root, headers = _prepare_env(monkeypatch, tmp_path)
     client = TestClient(app)
 
     run_id = "run_artifacts_missing"
@@ -205,13 +225,16 @@ def test_missing_artifact_returns_404(monkeypatch, tmp_path: Path):
         database_url=database_url,
     )
 
-    response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation")
+    response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation",
+        headers=headers,
+    )
     assert response.status_code == 404
     assert "not available" in response.json()["detail"].lower() or "not found" in response.json()["detail"].lower()
 
 
 def test_traversal_like_registered_path_rejected(monkeypatch, tmp_path: Path):
-    database_url, artifact_root = _prepare_env(monkeypatch, tmp_path)
+    database_url, artifact_root, headers = _prepare_env(monkeypatch, tmp_path)
     client = TestClient(app)
 
     run_id = "run_artifacts_traversal"
@@ -230,13 +253,16 @@ def test_traversal_like_registered_path_rejected(monkeypatch, tmp_path: Path):
         database_url=database_url,
     )
 
-    response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation")
+    response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/{source_name}/validation",
+        headers=headers,
+    )
     assert response.status_code == 403
     assert "outside" in response.json()["detail"].lower()
 
 
 def test_source_run_mismatch_returns_404(monkeypatch, tmp_path: Path):
-    database_url, artifact_root = _prepare_env(monkeypatch, tmp_path)
+    database_url, artifact_root, headers = _prepare_env(monkeypatch, tmp_path)
     client = TestClient(app)
 
     run_id = "run_artifacts_source_mismatch"
@@ -264,6 +290,9 @@ def test_source_run_mismatch_returns_404(monkeypatch, tmp_path: Path):
         database_url=database_url,
     )
 
-    response = client.get(f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/store/validation")
+    response = client.get(
+        f"/api/v1/diagnostics/preflight/runs/{run_id}/sources/store/validation",
+        headers=headers,
+    )
     assert response.status_code == 404
     assert "source 'store'" in response.json()["detail"].lower()

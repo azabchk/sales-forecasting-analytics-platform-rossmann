@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 import app.routers.diagnostics as diagnostics_router
 from app.main import app
+from backend.tests.diagnostics_auth_helpers import configure_auth_database, create_auth_headers
 
 
 def _sample_record(source_name: str = "train") -> dict:
@@ -23,7 +24,9 @@ def _sample_record(source_name: str = "train") -> dict:
     }
 
 
-def test_diagnostics_list_endpoint(monkeypatch):
+def test_diagnostics_list_endpoint(monkeypatch, tmp_path):
+    database_url = configure_auth_database(monkeypatch, tmp_path, db_name="diagnostics_router_list.db")
+    headers, _, _ = create_auth_headers(database_url=database_url, scopes=["diagnostics:read"], name="diag-read")
     client = TestClient(app)
 
     def fake_list(limit: int, source_name: str | None = None):
@@ -32,7 +35,7 @@ def test_diagnostics_list_endpoint(monkeypatch):
         return [_sample_record("train")]
 
     monkeypatch.setattr(diagnostics_router, "list_preflight_run_summaries", fake_list)
-    response = client.get("/api/v1/diagnostics/preflight/runs?limit=20&source_name=train")
+    response = client.get("/api/v1/diagnostics/preflight/runs?limit=20&source_name=train", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -42,7 +45,9 @@ def test_diagnostics_list_endpoint(monkeypatch):
     assert payload["items"][0]["run_id"] == "20260221_190000"
 
 
-def test_diagnostics_details_endpoint(monkeypatch):
+def test_diagnostics_details_endpoint(monkeypatch, tmp_path):
+    database_url = configure_auth_database(monkeypatch, tmp_path, db_name="diagnostics_router_details.db")
+    headers, _, _ = create_auth_headers(database_url=database_url, scopes=["diagnostics:read"], name="diag-read")
     client = TestClient(app)
 
     def fake_details(run_id: str):
@@ -57,7 +62,7 @@ def test_diagnostics_details_endpoint(monkeypatch):
         }
 
     monkeypatch.setattr(diagnostics_router, "get_preflight_run_details", fake_details)
-    response = client.get("/api/v1/diagnostics/preflight/runs/20260221_190000")
+    response = client.get("/api/v1/diagnostics/preflight/runs/20260221_190000", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -66,7 +71,9 @@ def test_diagnostics_details_endpoint(monkeypatch):
     assert len(payload["records"]) == 2
 
 
-def test_diagnostics_latest_endpoint(monkeypatch):
+def test_diagnostics_latest_endpoint(monkeypatch, tmp_path):
+    database_url = configure_auth_database(monkeypatch, tmp_path, db_name="diagnostics_router_latest.db")
+    headers, _, _ = create_auth_headers(database_url=database_url, scopes=["diagnostics:read"], name="diag-read")
     client = TestClient(app)
 
     def fake_latest():
@@ -80,7 +87,7 @@ def test_diagnostics_latest_endpoint(monkeypatch):
         }
 
     monkeypatch.setattr(diagnostics_router, "get_latest_preflight_run", fake_latest)
-    response = client.get("/api/v1/diagnostics/preflight/latest")
+    response = client.get("/api/v1/diagnostics/preflight/latest", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()
@@ -88,7 +95,9 @@ def test_diagnostics_latest_endpoint(monkeypatch):
     assert payload["final_status"] == "PASS"
 
 
-def test_diagnostics_latest_source_endpoint(monkeypatch):
+def test_diagnostics_latest_source_endpoint(monkeypatch, tmp_path):
+    database_url = configure_auth_database(monkeypatch, tmp_path, db_name="diagnostics_router_latest_source.db")
+    headers, _, _ = create_auth_headers(database_url=database_url, scopes=["diagnostics:read"], name="diag-read")
     client = TestClient(app)
 
     def fake_latest_source(source_name: str):
@@ -96,7 +105,7 @@ def test_diagnostics_latest_source_endpoint(monkeypatch):
         return _sample_record("store")
 
     monkeypatch.setattr(diagnostics_router, "get_latest_preflight_for_source", fake_latest_source)
-    response = client.get("/api/v1/diagnostics/preflight/latest/store")
+    response = client.get("/api/v1/diagnostics/preflight/latest/store", headers=headers)
 
     assert response.status_code == 200
     payload = response.json()

@@ -1,0 +1,13 @@
+version: v1
+channels:
+  - id: default_webhook
+    type: webhook
+    enabled: false
+    target_url_env: PREFLIGHT_ALERTS_WEBHOOK_URL
+    timeout_seconds: 5
+    max_attempts: 5
+    backoff_seconds: 30
+    signing_secret_env: PREFLIGHT_ALERTS_WEBHOOK_SIGNING_SECRET
+    enabled_event_types:
+      - ALERT_FIRING
+      - ALERT_RESOLVED

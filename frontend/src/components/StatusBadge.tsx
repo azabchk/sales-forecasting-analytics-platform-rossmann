@@ -12,12 +12,22 @@ function normalizeStatus(status: string | null | undefined): string {
 function statusClass(status: string): string {
   switch (status) {
     case "PASS":
+    case "OK":
+    case "RESOLVED":
+    case "LOW":
+    case "ACKED":
       return "pass";
     case "WARN":
+    case "PENDING":
+    case "MEDIUM":
+    case "SILENCED":
       return "warn";
     case "FAIL":
+    case "FIRING":
+    case "HIGH":
       return "fail";
     case "SKIPPED":
+    case "EVALUATED":
       return "skipped";
     default:
       return "unknown";

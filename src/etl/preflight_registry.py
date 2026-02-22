@@ -27,6 +27,10 @@ _REGISTRY_TABLE = sa.Table(
     sa.Column("blocked", sa.Boolean, nullable=False),
     sa.Column("block_reason", sa.Text, nullable=True),
     sa.PrimaryKeyConstraint("run_id", "source_name", name="pk_preflight_run_registry"),
+    sa.Index("ix_preflight_registry_created_at", "created_at"),
+    sa.Index("ix_preflight_registry_source_name", "source_name"),
+    sa.Index("ix_preflight_registry_final_status", "final_status"),
+    sa.Index("ix_preflight_registry_mode", "mode"),
 )
 
 _ENGINES: dict[str, sa.Engine] = {}
@@ -63,6 +67,14 @@ def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
             created_at = created_at.replace(tzinfo=timezone.utc)
         payload["created_at"] = created_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
     return payload
+
+
+def _ensure_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 def insert_preflight_run(record: dict[str, Any], database_url: str | None = None) -> None:
@@ -107,6 +119,45 @@ def list_preflight_runs(
 
     with engine.connect() as conn:
         rows = conn.execute(query).mappings().all()
+    return [_serialize_row(dict(row)) for row in rows]
+
+
+def query_preflight_runs(
+    *,
+    source_name: str | None = None,
+    mode: str | None = None,
+    final_status: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    limit: int | None = None,
+    database_url: str | None = None,
+) -> list[dict[str, Any]]:
+    """Query preflight records with optional filters ordered by latest first."""
+
+    engine = _ensure_registry_table(database_url)
+    query = sa.select(_REGISTRY_TABLE).order_by(_REGISTRY_TABLE.c.created_at.desc())
+
+    if source_name:
+        query = query.where(_REGISTRY_TABLE.c.source_name == source_name)
+    if mode:
+        query = query.where(_REGISTRY_TABLE.c.mode == mode)
+    if final_status:
+        query = query.where(sa.func.upper(_REGISTRY_TABLE.c.final_status) == str(final_status).strip().upper())
+
+    normalized_from = _ensure_utc(date_from)
+    normalized_to = _ensure_utc(date_to)
+    if normalized_from is not None:
+        query = query.where(_REGISTRY_TABLE.c.created_at >= normalized_from)
+    if normalized_to is not None:
+        query = query.where(_REGISTRY_TABLE.c.created_at <= normalized_to)
+
+    if limit is not None:
+        normalized_limit = max(1, min(int(limit), 5000))
+        query = query.limit(normalized_limit)
+
+    with engine.connect() as conn:
+        rows = conn.execute(query).mappings().all()
+
     return [_serialize_row(dict(row)) for row in rows]
 
 
