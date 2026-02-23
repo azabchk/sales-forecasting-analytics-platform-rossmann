@@ -16,6 +16,7 @@ from app.routers import (
     forecast,
     health,
     kpi,
+    ml,
     sales,
     stores,
     system,
@@ -103,5 +104,6 @@ app.include_router(forecast.router, prefix="/api/v1", tags=["forecast"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 app.include_router(data_sources.router, prefix="/api/v1", tags=["data_sources"])
 app.include_router(contracts.router, prefix="/api/v1", tags=["contracts"])
+app.include_router(ml.router, prefix="/api/v1", tags=["ml"])
 app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
 app.include_router(diagnostics.router, prefix="/api/v1", tags=["diagnostics"])
