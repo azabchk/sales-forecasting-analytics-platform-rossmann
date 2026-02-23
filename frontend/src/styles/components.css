@@ -1,0 +1,49 @@
+.filter-bar {
+  display: grid;
+  gap: 10px;
+}
+
+.table-row-active {
+  background: color-mix(in oklab, var(--brand) 12%, transparent);
+}
+
+.grid-two {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.stack {
+  display: grid;
+  gap: 10px;
+}
+
+.json-block {
+  margin: 0;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-soft) 70%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pagination-row {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.controls.compact {
+  display: flex;
+  align-items: flex-end;
+}
+
+@media (max-width: 980px) {
+  .grid-two {
+    grid-template-columns: 1fr;
+  }
+}

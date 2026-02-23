@@ -3,125 +3,100 @@ import React from "react";
 import { extractApiError } from "../api/client";
 import {
   fetchStores,
-  ForecastScenarioPoint,
-  ForecastScenarioResponse,
-  postForecastScenario,
+  postScenarioRunV2,
+  ScenarioRunResponseV2,
   Store,
 } from "../api/endpoints";
-import LoadingBlock from "../components/LoadingBlock";
 import ScenarioChart from "../components/ScenarioChart";
-import StoreSelector from "../components/StoreSelector";
-import { useI18n } from "../lib/i18n";
+import PageLayout from "../components/layout/PageLayout";
+import Card from "../components/ui/Card";
+import MetricCard from "../components/ui/MetricCard";
+import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
+import { useI18n } from "../lib/i18n";
 
-type PresetName = "baseline" | "promo_boost" | "cost_guard" | "risk_downturn";
-
-function applyPreset(preset: PresetName) {
-  if (preset === "promo_boost") {
-    return {
-      promoMode: "always_on" as const,
-      weekendOpen: true,
-      schoolHoliday: 0 as 0 | 1,
-      demandShiftPct: 12,
-      confidenceLevel: 0.9,
-    };
-  }
-  if (preset === "cost_guard") {
-    return {
-      promoMode: "off" as const,
-      weekendOpen: false,
-      schoolHoliday: 0 as 0 | 1,
-      demandShiftPct: -8,
-      confidenceLevel: 0.9,
-    };
-  }
-  if (preset === "risk_downturn") {
-    return {
-      promoMode: "as_is" as const,
-      weekendOpen: true,
-      schoolHoliday: 1 as 0 | 1,
-      demandShiftPct: -15,
-      confidenceLevel: 0.95,
-    };
-  }
-  return {
-    promoMode: "as_is" as const,
-    weekendOpen: true,
-    schoolHoliday: 0 as 0 | 1,
-    demandShiftPct: 0,
-    confidenceLevel: 0.8,
-  };
-}
+type ScenarioMode = "store" | "segment";
 
 export default function ScenarioLab() {
   const { locale, localeTag } = useI18n();
   const [stores, setStores] = React.useState<Store[]>([]);
+  const [mode, setMode] = React.useState<ScenarioMode>("store");
   const [storeId, setStoreId] = React.useState<number | undefined>(undefined);
+
+  const [segmentStoreType, setSegmentStoreType] = React.useState("");
+  const [segmentAssortment, setSegmentAssortment] = React.useState("");
+  const [segmentPromo2, setSegmentPromo2] = React.useState<"" | "0" | "1">("");
+
   const [horizon, setHorizon] = React.useState(30);
   const [promoMode, setPromoMode] = React.useState<"as_is" | "always_on" | "weekends_only" | "off">("as_is");
   const [weekendOpen, setWeekendOpen] = React.useState(true);
   const [schoolHoliday, setSchoolHoliday] = React.useState<0 | 1>(0);
+  const [priceChangePct, setPriceChangePct] = React.useState(0);
   const [demandShiftPct, setDemandShiftPct] = React.useState(0);
   const [confidenceLevel, setConfidenceLevel] = React.useState(0.8);
+
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
-  const [result, setResult] = React.useState<ForecastScenarioResponse | null>(null);
   const [lastUpdated, setLastUpdated] = React.useState("-");
+  const [result, setResult] = React.useState<ScenarioRunResponseV2 | null>(null);
 
   React.useEffect(() => {
     fetchStores()
       .then((rows) => {
         setStores(rows);
-        if (rows.length > 0) {
+        if (!storeId && rows.length > 0) {
           setStoreId(rows[0].store_id);
         }
       })
-      .catch((errorResponse) =>
+      .catch((errorResponse) => {
         setError(
-          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
-        )
-      );
-  }, [locale]);
-
-  const points = result?.points ?? [];
-  const summary = result?.summary;
-
-  const topPositiveDays = React.useMemo(
-    () =>
-      [...points]
-        .filter((row) => row.delta_sales > 0)
-        .sort((a, b) => b.delta_sales - a.delta_sales)
-        .slice(0, 8),
-    [points]
-  );
-
-  const topRiskDays = React.useMemo(
-    () =>
-      [...points]
-        .filter((row) => row.delta_sales < 0)
-        .sort((a, b) => a.delta_sales - b.delta_sales)
-        .slice(0, 8),
-    [points]
-  );
+          extractApiError(
+            errorResponse,
+            locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list."
+          )
+        );
+      });
+  }, [locale, storeId]);
 
   async function runScenario() {
-    if (!storeId) {
-      setError(locale === "ru" ? "Выберите магазин для симуляции сценария." : "Select a store to run scenario simulation.");
+    if (mode === "store" && !storeId) {
+      setError(locale === "ru" ? "Выберите магазин." : "Select a store.");
+      return;
+    }
+
+    if (mode === "segment" && !segmentStoreType && !segmentAssortment && segmentPromo2 === "") {
+      setError(
+        locale === "ru"
+          ? "Укажите хотя бы один фильтр сегмента."
+          : "Provide at least one segment filter."
+      );
       return;
     }
 
     setError("");
     setLoading(true);
+
     try {
-      const response = await postForecastScenario({
-        store_id: storeId,
+      const response = await postScenarioRunV2({
+        ...(mode === "store" ? { store_id: storeId } : {}),
+        ...(mode === "segment"
+          ? {
+              segment: {
+                ...(segmentStoreType ? { store_type: segmentStoreType } : {}),
+                ...(segmentAssortment ? { assortment: segmentAssortment } : {}),
+                ...(segmentPromo2 === "" ? {} : { promo2: Number(segmentPromo2) as 0 | 1 }),
+              },
+            }
+          : {}),
         horizon_days: horizon,
         promo_mode: promoMode,
         weekend_open: weekendOpen,
         school_holiday: schoolHoliday,
+        price_change_pct: priceChangePct,
         demand_shift_pct: demandShiftPct,
         confidence_level: confidenceLevel,
       });
+
       setResult(response);
       setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
     } catch (errorResponse) {
@@ -129,8 +104,8 @@ export default function ScenarioLab() {
         extractApiError(
           errorResponse,
           locale === "ru"
-            ? "Симуляция сценария не удалась. Проверьте backend и артефакты модели."
-            : "Scenario simulation failed. Verify backend and model artifacts."
+            ? "Ошибка расчета сценария. Проверьте параметры и backend."
+            : "Scenario run failed. Verify request parameters and backend service."
         )
       );
     } finally {
@@ -138,118 +113,98 @@ export default function ScenarioLab() {
     }
   }
 
-  function applyScenarioPreset(name: PresetName) {
-    const next = applyPreset(name);
-    setPromoMode(next.promoMode);
-    setWeekendOpen(next.weekendOpen);
-    setSchoolHoliday(next.schoolHoliday);
-    setDemandShiftPct(next.demandShiftPct);
-    setConfidenceLevel(next.confidenceLevel);
-  }
-
-  function downloadScenarioCsv() {
-    if (points.length === 0 || !storeId) {
-      return;
-    }
-
-    const header = "date,baseline_sales,scenario_sales,delta_sales,scenario_lower,scenario_upper";
-    const rows = points.map(
-      (row) =>
-        `${row.date},${row.baseline_sales},${row.scenario_sales},${row.delta_sales},${row.scenario_lower ?? ""},${row.scenario_upper ?? ""}`
-    );
-    const csv = [header, ...rows].join("\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `scenario_store_${storeId}_${horizon}d.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    document.body.removeChild(anchor);
-    URL.revokeObjectURL(url);
-  }
-
-  function renderOpportunityTable(title: string, rows: ForecastScenarioPoint[], mode: "up" | "down") {
-    return (
-      <div className="panel">
-        <div className="panel-head">
-          <h3>{title}</h3>
-          <p className="panel-subtitle">
-            {mode === "up"
-              ? locale === "ru"
-                ? "Дни с наибольшим потенциалом роста в текущем сценарии."
-                : "Days with highest upside under current scenario."
-              : locale === "ru"
-                ? "Дни с наибольшим риском снижения в текущем сценарии."
-                : "Days with highest downside risk under current scenario."}
-          </p>
-        </div>
-        <div className="table-wrap">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{locale === "ru" ? "Дата" : "Date"}</th>
-                <th>{locale === "ru" ? "База" : "Baseline"}</th>
-                <th>{locale === "ru" ? "Сценарий" : "Scenario"}</th>
-                <th>{locale === "ru" ? "Дельта" : "Delta"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr>
-                  <td colSpan={4}>
-                    {locale === "ru" ? "Нет строк в этой категории для текущих настроек." : "No rows in this category for current settings."}
-                  </td>
-                </tr>
-              )}
-              {rows.map((row) => (
-                <tr key={`${title}-${row.date}`}>
-                  <td>{row.date}</td>
-                  <td>{formatInt(row.baseline_sales)}</td>
-                  <td>{formatInt(row.scenario_sales)}</td>
-                  <td className={row.delta_sales >= 0 ? "td-positive" : "td-negative"}>{formatInt(row.delta_sales)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    );
-  }
+  const summary = result?.summary;
 
   return (
-    <section className="page">
-      <div className="page-head">
-        <div>
-          <h2 className="page-title">{locale === "ru" ? "Лаборатория сценариев" : "Scenario Lab"}</h2>
-          <p className="page-note">
-            {locale === "ru"
-              ? "What-if симулятор для планирования спроса на основе промо-стратегии, правил работы и сдвига спроса."
-              : "What-if simulator for demand planning using promo strategy, operating rules, and demand shift assumptions."}
-          </p>
-        </div>
-        <div className="inline-meta">
-          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
-          <div className="preset-row">
-            <button className="button ghost" type="button" onClick={() => applyScenarioPreset("baseline")}>
-              {locale === "ru" ? "База" : "Baseline"}
-            </button>
-            <button className="button ghost" type="button" onClick={() => applyScenarioPreset("promo_boost")}>
-              {locale === "ru" ? "Промо-рост" : "Promo Boost"}
-            </button>
-            <button className="button ghost" type="button" onClick={() => applyScenarioPreset("cost_guard")}>
-              {locale === "ru" ? "Контроль затрат" : "Cost Guard"}
-            </button>
-            <button className="button ghost" type="button" onClick={() => applyScenarioPreset("risk_downturn")}>
-              {locale === "ru" ? "Риск спада" : "Risk Downturn"}
-            </button>
-          </div>
-        </div>
-      </div>
+    <PageLayout
+      title={locale === "ru" ? "Лаборатория сценариев" : "Scenario Lab"}
+      subtitle={
+        locale === "ru"
+          ? "What-if прогнозирование для store/segment целей с учетом price/promo предпосылок."
+          : "What-if forecasting for store and segment targets with explicit price/promo assumptions."
+      }
+      actions={
+        <p className="meta-text">
+          {locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}
+        </p>
+      }
+    >
+      {error ? <ErrorState message={error} /> : null}
 
-      <div className="panel">
+      <Card
+        title={locale === "ru" ? "Параметры сценария" : "Scenario Inputs"}
+        subtitle={locale === "ru" ? "Выберите target mode и бизнес-параметры." : "Choose target mode and business controls."}
+      >
         <div className="controls">
-          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label={locale === "ru" ? "Магазин" : "Store"} includeAllOption={false} id="scenario-store" />
+          <div className="field">
+            <label htmlFor="scenario-mode">{locale === "ru" ? "Режим" : "Mode"}</label>
+            <select
+              id="scenario-mode"
+              className="select"
+              value={mode}
+              onChange={(event) => setMode(event.target.value as ScenarioMode)}
+            >
+              <option value="store">{locale === "ru" ? "Магазин" : "Store"}</option>
+              <option value="segment">{locale === "ru" ? "Сегмент" : "Segment"}</option>
+            </select>
+          </div>
+
+          {mode === "store" ? (
+            <div className="field">
+              <label htmlFor="scenario-store">{locale === "ru" ? "Магазин" : "Store"}</label>
+              <select
+                id="scenario-store"
+                className="select"
+                value={storeId ?? ""}
+                onChange={(event) => setStoreId(Number(event.target.value))}
+              >
+                {stores.map((store) => (
+                  <option key={store.store_id} value={store.store_id}>
+                    #{store.store_id} · {store.store_type || "-"}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <>
+              <div className="field">
+                <label htmlFor="segment-store-type">store_type</label>
+                <input
+                  id="segment-store-type"
+                  className="input"
+                  placeholder="a"
+                  value={segmentStoreType}
+                  onChange={(event) => setSegmentStoreType(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="segment-assortment">assortment</label>
+                <input
+                  id="segment-assortment"
+                  className="input"
+                  placeholder="a"
+                  value={segmentAssortment}
+                  onChange={(event) => setSegmentAssortment(event.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="segment-promo2">promo2</label>
+                <select
+                  id="segment-promo2"
+                  className="select"
+                  value={segmentPromo2}
+                  onChange={(event) => setSegmentPromo2(event.target.value as "" | "0" | "1")}
+                >
+                  <option value="">{locale === "ru" ? "Любой" : "Any"}</option>
+                  <option value="1">1</option>
+                  <option value="0">0</option>
+                </select>
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="controls">
           <div className="field">
             <label htmlFor="scenario-horizon">{locale === "ru" ? "Горизонт (дни)" : "Horizon (days)"}</label>
             <input
@@ -270,27 +225,25 @@ export default function ScenarioLab() {
               value={promoMode}
               onChange={(event) => setPromoMode(event.target.value as "as_is" | "always_on" | "weekends_only" | "off")}
             >
-              <option value="as_is">{locale === "ru" ? "Как есть (без промо)" : "As Is (default no promo)"}</option>
-              <option value="always_on">{locale === "ru" ? "Всегда включено" : "Always On"}</option>
-              <option value="weekends_only">{locale === "ru" ? "Только выходные" : "Weekends Only"}</option>
-              <option value="off">{locale === "ru" ? "Всегда выключено" : "Always Off"}</option>
+              <option value="as_is">as_is</option>
+              <option value="always_on">always_on</option>
+              <option value="weekends_only">weekends_only</option>
+              <option value="off">off</option>
             </select>
           </div>
           <div className="field">
-            <label htmlFor="scenario-confidence">{locale === "ru" ? "Уровень доверия" : "Confidence level"}</label>
+            <label htmlFor="scenario-confidence">{locale === "ru" ? "Confidence" : "Confidence"}</label>
             <select
               id="scenario-confidence"
               className="select"
               value={confidenceLevel}
               onChange={(event) => setConfidenceLevel(Number(event.target.value))}
             >
-              <option value={0.8}>80%</option>
-              <option value={0.9}>90%</option>
-              <option value={0.95}>95%</option>
+              <option value={0.8}>0.80</option>
+              <option value={0.9}>0.90</option>
+              <option value={0.95}>0.95</option>
             </select>
           </div>
-        </div>
-        <div className="controls scenario-controls-row">
           <label className="toggle-field" htmlFor="scenario-weekend-open">
             <input
               id="scenario-weekend-open"
@@ -298,7 +251,7 @@ export default function ScenarioLab() {
               checked={weekendOpen}
               onChange={(event) => setWeekendOpen(event.target.checked)}
             />
-            {locale === "ru" ? "Открыто по выходным" : "Keep weekend open"}
+            {locale === "ru" ? "Открыто в выходные" : "Weekend open"}
           </label>
           <label className="toggle-field" htmlFor="scenario-school-holiday">
             <input
@@ -307,12 +260,31 @@ export default function ScenarioLab() {
               checked={schoolHoliday === 1}
               onChange={(event) => setSchoolHoliday(event.target.checked ? 1 : 0)}
             />
-            {locale === "ru" ? "Учитывать школьные каникулы" : "Force school holiday"}
+            {locale === "ru" ? "School holiday" : "School holiday"}
           </label>
+        </div>
+
+        <div className="controls">
           <div className="field slider-field">
-            <label htmlFor="scenario-shift">{locale === "ru" ? "Сдвиг спроса" : "Demand shift"} ({demandShiftPct}%)</label>
+            <label htmlFor="scenario-price-change">
+              {locale === "ru" ? "Изменение цены" : "Price change"} ({priceChangePct}%)
+            </label>
             <input
-              id="scenario-shift"
+              id="scenario-price-change"
+              type="range"
+              min={-30}
+              max={30}
+              step={1}
+              value={priceChangePct}
+              onChange={(event) => setPriceChangePct(Number(event.target.value))}
+            />
+          </div>
+          <div className="field slider-field">
+            <label htmlFor="scenario-demand-shift">
+              {locale === "ru" ? "Сдвиг спроса" : "Demand shift"} ({demandShiftPct}%)
+            </label>
+            <input
+              id="scenario-demand-shift"
               type="range"
               min={-50}
               max={50}
@@ -321,68 +293,53 @@ export default function ScenarioLab() {
               onChange={(event) => setDemandShiftPct(Number(event.target.value))}
             />
           </div>
-          <button className="button primary" type="button" onClick={runScenario} disabled={loading || !storeId}>
-            {loading ? (locale === "ru" ? "Выполняется..." : "Running...") : locale === "ru" ? "Запустить сценарий" : "Run scenario"}
-          </button>
-          <button className="button" type="button" onClick={downloadScenarioCsv} disabled={points.length === 0}>
-            {locale === "ru" ? "Скачать CSV" : "Download CSV"}
+          <button className="button primary" type="button" onClick={runScenario} disabled={loading}>
+            {loading ? (locale === "ru" ? "Расчет..." : "Running...") : locale === "ru" ? "Запустить сценарий" : "Run Scenario"}
           </button>
         </div>
-      </div>
+      </Card>
 
-      {error && <p className="error">{error}</p>}
+      {loading && !result ? <LoadingState lines={4} /> : null}
 
-      {loading && !result && (
-        <div className="panel">
-          <LoadingBlock lines={4} className="loading-stack" />
+      {summary ? (
+        <div className="insight-grid">
+          <MetricCard label={locale === "ru" ? "База" : "Baseline"} value={formatInt(summary.total_baseline_sales)} />
+          <MetricCard label={locale === "ru" ? "Сценарий" : "Scenario"} value={formatInt(summary.total_scenario_sales)} />
+          <MetricCard label={locale === "ru" ? "Дельта" : "Delta"} value={formatInt(summary.total_delta_sales)} />
+          <MetricCard label={locale === "ru" ? "Uplift" : "Uplift"} value={formatPercent(summary.uplift_pct)} />
+          <MetricCard label={locale === "ru" ? "Средн. дневная дельта" : "Avg Daily Delta"} value={formatInt(summary.avg_daily_delta)} />
         </div>
-      )}
+      ) : null}
 
-      {summary && (
+      {result ? (
         <>
-          <div className="forecast-summary">
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Итого базовый" : "Baseline total"}</p>
-              <p className="value">{formatInt(summary.total_baseline_sales)}</p>
+          <Card
+            title={locale === "ru" ? "Предпосылки сценария" : "Scenario Assumptions"}
+            subtitle={
+              locale === "ru"
+                ? "Price elasticity применяется как приближение: effective_demand_shift = demand_shift - elasticity*price_change"
+                : "Price elasticity is an approximation: effective_demand_shift = demand_shift - elasticity*price_change"
+            }
+          >
+            <div className="insight-grid">
+              <MetricCard label="price_change_pct" value={formatPercent(result.assumptions.price_change_pct)} />
+              <MetricCard label="price_elasticity" value={formatDecimal(result.assumptions.price_elasticity)} />
+              <MetricCard label="price_effect_pct" value={formatPercent(result.assumptions.price_effect_pct)} />
+              <MetricCard
+                label="effective_demand_shift_pct"
+                value={formatPercent(result.assumptions.effective_demand_shift_pct)}
+              />
+              <MetricCard
+                label={locale === "ru" ? "Target" : "Target"}
+                value={result.target.mode === "segment" ? `segment (${result.target.stores_count ?? 0})` : `store ${result.target.store_id ?? "-"}`}
+              />
             </div>
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Итого сценарий" : "Scenario total"}</p>
-              <p className="value">{formatInt(summary.total_scenario_sales)}</p>
-            </div>
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Общая дельта" : "Total delta"}</p>
-              <p className={`value ${summary.total_delta_sales >= 0 ? "positive" : "negative"}`}>{formatInt(summary.total_delta_sales)}</p>
-            </div>
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Рост" : "Uplift"}</p>
-              <p className={`value ${summary.uplift_pct >= 0 ? "positive" : "negative"}`}>{formatPercent(summary.uplift_pct)}</p>
-            </div>
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Средняя дневная дельта" : "Avg daily delta"}</p>
-              <p className={`value ${summary.avg_daily_delta >= 0 ? "positive" : "negative"}`}>{formatDecimal(summary.avg_daily_delta)}</p>
-            </div>
-            <div className="summary-box">
-              <p className="label">{locale === "ru" ? "Лучший день по дельте" : "Best delta day"}</p>
-              <p className="value">
-                {summary.max_delta_date ?? "-"} ({formatInt(summary.max_delta_value)})
-              </p>
-            </div>
-          </div>
-
-          {points.length > 0 && <ScenarioChart data={points} />}
-
-          {renderOpportunityTable(locale === "ru" ? "Топ дней с потенциалом роста" : "Top Opportunity Days", topPositiveDays, "up")}
-          {renderOpportunityTable(locale === "ru" ? "Топ дней с риском падения" : "Top Risk Days", topRiskDays, "down")}
+          </Card>
+          <ScenarioChart data={result.points} />
         </>
+      ) : (
+        !loading && <EmptyState message={locale === "ru" ? "Запустите сценарий для просмотра результатов." : "Run a scenario to see forecast comparisons."} />
       )}
-
-      {!loading && !summary && !error && (
-        <p className="muted">
-          {locale === "ru"
-            ? "Настройте параметры сценария и запустите симулятор для сравнения результатов."
-            : "Configure scenario controls and run the simulator to compare outcomes."}
-        </p>
-      )}
-    </section>
+    </PageLayout>
   );
 }

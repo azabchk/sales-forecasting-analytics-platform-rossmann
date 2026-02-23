@@ -1,0 +1,15 @@
+.page {
+  gap: 16px;
+}
+
+.page-head {
+  margin-bottom: 2px;
+}
+
+.panel h4 {
+  margin: 0;
+}
+
+.panel .muted {
+  margin: 0;
+}

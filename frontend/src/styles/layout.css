@@ -1,0 +1,199 @@
+.ecosystem-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 286px minmax(0, 1fr);
+}
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in oklab, var(--bg-elevated) 92%, transparent), var(--bg-soft));
+  padding: 20px 16px;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  padding: 6px 8px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-eyebrow {
+  margin: 0 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.sidebar-title {
+  margin: 0;
+  font-size: 1.18rem;
+}
+
+.sidebar-nav {
+  display: grid;
+  gap: 18px;
+  margin-top: 16px;
+}
+
+.sidebar-section-title {
+  margin: 0 0 8px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.sidebar-links {
+  display: grid;
+  gap: 6px;
+}
+
+.sidebar-link {
+  display: block;
+  text-decoration: none;
+  padding: 9px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  font-weight: 600;
+  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
+}
+
+.sidebar-link:hover {
+  background: color-mix(in oklab, var(--bg-elevated) 88%, transparent);
+  color: var(--text);
+  border-color: var(--border);
+}
+
+.sidebar-link.active {
+  background: linear-gradient(135deg, color-mix(in oklab, var(--brand) 88%, #0f9274), color-mix(in oklab, var(--brand-strong) 85%, #085544));
+  color: #ffffff;
+}
+
+.ecosystem-main {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.app-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--bg-elevated) 90%, transparent);
+  backdrop-filter: blur(12px);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 24px;
+}
+
+.app-topbar-title h2 {
+  margin: 0;
+  font-size: 1.18rem;
+}
+
+.app-topbar-title p {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+}
+
+.app-topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.topbar-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: color-mix(in oklab, var(--bg-elevated) 84%, transparent);
+}
+
+.topbar-status p {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+.topbar-status small {
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+.topbar-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.topbar-status.online .topbar-status-dot {
+  background: #13936f;
+}
+
+.topbar-status.offline .topbar-status-dot {
+  background: #c14539;
+}
+
+.topbar-status.checking .topbar-status-dot {
+  background: #7e8d88;
+}
+
+.topbar-locale {
+  display: flex;
+  gap: 6px;
+}
+
+.ecosystem-main .app-main {
+  max-width: 100%;
+  margin: 0;
+  padding: 20px 24px 16px;
+}
+
+.ecosystem-main .footer {
+  max-width: 100%;
+  margin: 0;
+  padding: 12px 24px 18px;
+}
+
+@media (max-width: 1220px) {
+  .ecosystem-shell {
+    grid-template-columns: 236px minmax(0, 1fr);
+  }
+
+  .app-topbar-title p {
+    display: none;
+  }
+}
+
+@media (max-width: 980px) {
+  .ecosystem-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: static;
+    height: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .app-topbar {
+    position: static;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

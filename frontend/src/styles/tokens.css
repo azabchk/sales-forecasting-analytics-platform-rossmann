@@ -1,0 +1,38 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap");
+
+:root {
+  --bg: #f4f7f6;
+  --bg-elevated: #ffffff;
+  --bg-soft: #e9f0ed;
+  --text: #10201d;
+  --text-muted: #4f6660;
+  --brand: #0d7a63;
+  --brand-strong: #075a4a;
+  --border: #cfe0d9;
+  --shadow: 0 10px 26px rgba(10, 48, 39, 0.1);
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 8px;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d1413;
+  --bg-elevated: #13201e;
+  --bg-soft: #1c2b28;
+  --text: #dbe8e4;
+  --text-muted: #9bb3ac;
+  --brand: #47cca8;
+  --brand-strong: #2fb58f;
+  --border: #2b423d;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.35);
+}
+
+body {
+  font-family: "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
+}
+
+.page-title,
+.sidebar-title,
+.app-topbar h2 {
+  font-family: "Space Grotesk", "IBM Plex Sans", sans-serif;
+}

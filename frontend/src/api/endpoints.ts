@@ -183,6 +183,9 @@ export type PreflightRunSummary = {
   artifact_dir?: string | null;
   validation_report_path?: string | null;
   manifest_path?: string | null;
+  data_source_id?: number | null;
+  contract_id?: string | null;
+  contract_version?: string | null;
 };
 
 export type PreflightRunsListResponse = {
@@ -532,6 +535,7 @@ export async function postChatQuery(payload: { message: string }): Promise<ChatR
 export async function fetchPreflightRuns(params: {
   limit: number;
   source_name?: PreflightSourceName;
+  data_source_id?: number;
 }): Promise<PreflightRunsListResponse> {
   const { data } = await apiClient.get<PreflightRunsListResponse>("/diagnostics/preflight/runs", { params });
   return data;
@@ -706,4 +710,280 @@ export function buildPreflightArtifactDownloadUrl(
   const baseUrl = String(apiClient.defaults.baseURL ?? "").replace(/\/$/, "");
   const runEncoded = encodeURIComponent(runId);
   return `${baseUrl}/diagnostics/preflight/runs/${runEncoded}/sources/${sourceName}/download/${artifactType}`;
+}
+
+export type DataSource = {
+  id: number;
+  name: string;
+  description?: string | null;
+  source_type: string;
+  related_contract_id?: string | null;
+  related_contract_version?: string | null;
+  is_active: boolean;
+  is_default: boolean;
+  created_at: string;
+  updated_at: string;
+  last_preflight_status?: string | null;
+  last_preflight_at?: string | null;
+  last_preflight_run_id?: string | null;
+};
+
+export type DataSourceCreateRequest = {
+  name: string;
+  description?: string;
+  source_type?: string;
+  related_contract_id?: string;
+  related_contract_version?: string;
+  is_active?: boolean;
+  is_default?: boolean;
+};
+
+export type DataSourcePreflightRun = PreflightRunSummary;
+
+export async function fetchDataSources(params?: {
+  include_inactive?: boolean;
+}): Promise<DataSource[]> {
+  const { data } = await apiClient.get<DataSource[]>("/data-sources", { params });
+  return data;
+}
+
+export async function postDataSource(payload: DataSourceCreateRequest): Promise<DataSource> {
+  const { data } = await apiClient.post<DataSource>("/data-sources", payload);
+  return data;
+}
+
+export async function fetchDataSource(dataSourceId: number): Promise<DataSource> {
+  const { data } = await apiClient.get<DataSource>(`/data-sources/${dataSourceId}`);
+  return data;
+}
+
+export async function fetchDataSourcePreflightRuns(
+  dataSourceId: number,
+  params?: { limit?: number }
+): Promise<DataSourcePreflightRun[]> {
+  const { data } = await apiClient.get<DataSourcePreflightRun[]>(
+    `/data-sources/${dataSourceId}/preflight-runs`,
+    { params }
+  );
+  return data;
+}
+
+export type ContractSummary = {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  latest_version?: string | null;
+  versions_count: number;
+};
+
+export type ContractVersionSummary = {
+  version: string;
+  created_at?: string | null;
+  changed_by?: string | null;
+  changelog?: string | null;
+  schema_path: string;
+};
+
+export type ContractSchemaSummary = {
+  required_columns: string[];
+  aliases: Record<string, string[]>;
+  dtypes: Record<string, string>;
+};
+
+export type ContractVersionDetail = ContractVersionSummary & {
+  contract_version: string;
+  profiles: Record<string, ContractSchemaSummary>;
+};
+
+export type ContractDetail = {
+  id: string;
+  name: string;
+  description?: string | null;
+  is_active: boolean;
+  versions: ContractVersionSummary[];
+};
+
+export async function fetchContracts(): Promise<ContractSummary[]> {
+  const { data } = await apiClient.get<ContractSummary[]>("/contracts");
+  return data;
+}
+
+export async function fetchContract(contractId: string): Promise<ContractDetail> {
+  const { data } = await apiClient.get<ContractDetail>(`/contracts/${encodeURIComponent(contractId)}`);
+  return data;
+}
+
+export async function fetchContractVersions(contractId: string): Promise<ContractVersionSummary[]> {
+  const { data } = await apiClient.get<ContractVersionSummary[]>(
+    `/contracts/${encodeURIComponent(contractId)}/versions`
+  );
+  return data;
+}
+
+export async function fetchContractVersion(
+  contractId: string,
+  version: string
+): Promise<ContractVersionDetail> {
+  const { data } = await apiClient.get<ContractVersionDetail>(
+    `/contracts/${encodeURIComponent(contractId)}/versions/${encodeURIComponent(version)}`
+  );
+  return data;
+}
+
+export type MLPeriod = {
+  start?: string | null;
+  end?: string | null;
+};
+
+export type MLExperimentListItem = {
+  experiment_id: string;
+  data_source_id?: number | null;
+  model_type: string;
+  hyperparameters: Record<string, unknown>;
+  training_period: MLPeriod;
+  validation_period: MLPeriod;
+  metrics: Record<string, unknown>;
+  status: string;
+  artifact_path?: string | null;
+  metadata_path?: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type MLExperimentsResponse = {
+  items: MLExperimentListItem[];
+  limit: number;
+  data_source_id?: number | null;
+};
+
+export type MLExperimentDetail = MLExperimentListItem;
+
+export async function fetchMLExperiments(params?: {
+  limit?: number;
+  data_source_id?: number;
+}): Promise<MLExperimentsResponse> {
+  const { data } = await apiClient.get<MLExperimentsResponse>("/ml/experiments", { params });
+  return data;
+}
+
+export async function fetchMLExperiment(experimentId: string): Promise<MLExperimentDetail> {
+  const { data } = await apiClient.get<MLExperimentDetail>(`/ml/experiments/${encodeURIComponent(experimentId)}`);
+  return data;
+}
+
+export type ScenarioSegmentFilter = {
+  store_type?: string;
+  assortment?: string;
+  promo2?: 0 | 1;
+};
+
+export type ScenarioRunRequestV2 = {
+  store_id?: number;
+  segment?: ScenarioSegmentFilter;
+  price_change_pct: number;
+  promo_mode: "as_is" | "always_on" | "weekends_only" | "off";
+  weekend_open: boolean;
+  school_holiday: 0 | 1;
+  demand_shift_pct: number;
+  confidence_level: number;
+  horizon_days: number;
+  data_source_id?: number;
+};
+
+export type ScenarioRunTarget = {
+  mode: "store" | "segment";
+  store_id?: number;
+  segment?: Record<string, unknown>;
+  stores_count?: number;
+  store_ids?: number[];
+};
+
+export type ScenarioRunAssumptions = {
+  price_change_pct: number;
+  price_elasticity: number;
+  price_effect_pct: number;
+  effective_demand_shift_pct: number;
+};
+
+export type ScenarioRunResponseV2 = {
+  run_id: string;
+  target: ScenarioRunTarget;
+  assumptions: ScenarioRunAssumptions;
+  request: Record<string, unknown>;
+  summary: ForecastScenarioSummary;
+  points: ForecastScenarioPoint[];
+};
+
+export async function postScenarioRunV2(payload: ScenarioRunRequestV2): Promise<ScenarioRunResponseV2> {
+  const { data } = await apiClient.post<ScenarioRunResponseV2>("/scenario/run", payload);
+  return data;
+}
+
+export type NotificationEndpoint = {
+  id: string;
+  channel_type: string;
+  enabled: boolean;
+  target_hint?: string | null;
+  has_target_url: boolean;
+  timeout_seconds: number;
+  max_attempts: number;
+  backoff_seconds: number;
+  enabled_event_types: string[];
+};
+
+export type NotificationEndpointsResponse = {
+  version: string;
+  path: string;
+  items: NotificationEndpoint[];
+};
+
+export type NotificationDelivery = {
+  attempt_id: string;
+  outbox_item_id: string;
+  event_id?: string | null;
+  delivery_id?: string | null;
+  replayed_from_id?: string | null;
+  channel_type: string;
+  channel_target: string;
+  event_type: string;
+  alert_id: string;
+  policy_id: string;
+  source_name?: string | null;
+  attempt_number: number;
+  attempt_status: string;
+  started_at: string;
+  completed_at?: string | null;
+  duration_ms?: number | null;
+  http_status?: number | null;
+  error_code?: string | null;
+  error_message_safe?: string | null;
+  created_at: string;
+};
+
+export type NotificationDeliveryPage = {
+  page: number;
+  page_size: number;
+  total: number;
+  status?: string | null;
+  items: NotificationDelivery[];
+};
+
+export async function fetchNotificationEndpoints(): Promise<NotificationEndpointsResponse> {
+  const { data } = await apiClient.get<NotificationEndpointsResponse>(
+    "/diagnostics/preflight/notifications/endpoints"
+  );
+  return data;
+}
+
+export async function fetchNotificationDeliveries(params?: {
+  page?: number;
+  page_size?: number;
+  status?: string;
+}): Promise<NotificationDeliveryPage> {
+  const { data } = await apiClient.get<NotificationDeliveryPage>(
+    "/diagnostics/preflight/notifications/deliveries",
+    { params }
+  );
+  return data;
 }
