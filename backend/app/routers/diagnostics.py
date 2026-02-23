@@ -137,7 +137,10 @@ def diagnostics_preflight_runs(
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunsListResponse:
     try:
-        items = list_preflight_run_summaries(limit=limit, source_name=source_name, data_source_id=data_source_id)
+        kwargs: dict[str, object] = {"limit": limit, "source_name": source_name}
+        if data_source_id is not None:
+            kwargs["data_source_id"] = data_source_id
+        items = list_preflight_run_summaries(**kwargs)
         return PreflightRunsListResponse(items=items, limit=limit, source_name=source_name)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
@@ -164,7 +167,10 @@ def diagnostics_preflight_latest(
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunDetailResponse:
     try:
-        payload = get_latest_preflight_run(data_source_id=data_source_id)
+        if data_source_id is None:
+            payload = get_latest_preflight_run()
+        else:
+            payload = get_latest_preflight_run(data_source_id=data_source_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
 
@@ -180,7 +186,10 @@ def diagnostics_preflight_latest_by_source(
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunSummary:
     try:
-        payload = get_latest_preflight_for_source(source_name, data_source_id=data_source_id)
+        if data_source_id is None:
+            payload = get_latest_preflight_for_source(source_name)
+        else:
+            payload = get_latest_preflight_for_source(source_name, data_source_id=data_source_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
 

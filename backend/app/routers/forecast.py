@@ -16,11 +16,13 @@ router = APIRouter()
 @router.post("/forecast", response_model=list[ForecastPoint])
 def forecast_sales(payload: ForecastRequest) -> list[ForecastPoint]:
     try:
-        return forecast_for_store(
-            store_id=payload.store_id,
-            horizon_days=payload.horizon_days,
-            data_source_id=payload.data_source_id,
-        )
+        kwargs = {
+            "store_id": payload.store_id,
+            "horizon_days": payload.horizon_days,
+        }
+        if payload.data_source_id is not None:
+            kwargs["data_source_id"] = payload.data_source_id
+        return forecast_for_store(**kwargs)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -32,16 +34,18 @@ def forecast_sales(payload: ForecastRequest) -> list[ForecastPoint]:
 @router.post("/forecast/scenario", response_model=ForecastScenarioResponse)
 def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenarioResponse:
     try:
-        result = forecast_scenario_for_store(
-            store_id=payload.store_id,
-            horizon_days=payload.horizon_days,
-            promo_mode=payload.promo_mode,
-            weekend_open=payload.weekend_open,
-            school_holiday=payload.school_holiday,
-            demand_shift_pct=payload.demand_shift_pct,
-            confidence_level=payload.confidence_level,
-            data_source_id=payload.data_source_id,
-        )
+        kwargs = {
+            "store_id": payload.store_id,
+            "horizon_days": payload.horizon_days,
+            "promo_mode": payload.promo_mode,
+            "weekend_open": payload.weekend_open,
+            "school_holiday": payload.school_holiday,
+            "demand_shift_pct": payload.demand_shift_pct,
+            "confidence_level": payload.confidence_level,
+        }
+        if payload.data_source_id is not None:
+            kwargs["data_source_id"] = payload.data_source_id
+        result = forecast_scenario_for_store(**kwargs)
         return ForecastScenarioResponse.model_validate(result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -51,14 +55,20 @@ def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenari
         raise HTTPException(status_code=500, detail=f"Scenario forecast error: {exc}") from exc
 
 
-@router.post("/forecast/batch", response_model=ForecastBatchResponse)
+@router.post(
+    "/forecast/batch",
+    response_model=ForecastBatchResponse,
+    response_model_exclude_none=True,
+)
 def forecast_sales_batch(payload: ForecastBatchRequest) -> ForecastBatchResponse:
     try:
-        result = forecast_batch_for_stores(
-            store_ids=payload.store_ids,
-            horizon_days=payload.horizon_days,
-            data_source_id=payload.data_source_id,
-        )
+        kwargs = {
+            "store_ids": payload.store_ids,
+            "horizon_days": payload.horizon_days,
+        }
+        if payload.data_source_id is not None:
+            kwargs["data_source_id"] = payload.data_source_id
+        result = forecast_batch_for_stores(**kwargs)
         return ForecastBatchResponse.model_validate(result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
