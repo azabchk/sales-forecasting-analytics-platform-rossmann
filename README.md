@@ -184,6 +184,24 @@ See full local setup and troubleshooting:
 
 - `docs/LOCAL-DEV.md`
 
+## Online Deployment (Company + Product)
+
+Ready-to-run deployment pack is included for both PaaS and VPS flows:
+
+- Company/domain model: `docs/COMPANY.md`
+- Frontend (Vercel): `docs/DEPLOY-VERCEL.md`
+- Backend (Render primary, Fly alternative): `docs/DEPLOY-BACKEND-PAAS.md`
+- Managed PostgreSQL options (Supabase/DO/AWS): `docs/MANAGED-POSTGRES.md`
+- VPS self-host option: `docs/DEPLOY-VPS.md`
+- Cloudflare DNS/domain setup: `docs/DOMAIN-DNS.md`
+- Production checklist: `docs/PROD-CHECKLIST.md`
+- Production env template: `.env.production.example`
+
+Automation scripts:
+
+- `bash scripts/prod_env_check.sh`
+- `bash scripts/release_and_deploy_plan.sh`
+
 ## Windows 11 (Recommended Local Flow)
 
 ### One-click run
