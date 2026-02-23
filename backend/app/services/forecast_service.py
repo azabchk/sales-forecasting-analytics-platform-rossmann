@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from statistics import NormalDist
+from typing import Any
+import uuid
+import sys
 
 import joblib
 import numpy as np
@@ -11,6 +15,13 @@ import sqlalchemy as sa
 
 from app.config import get_settings
 from app.db import engine
+
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.etl.data_source_registry import resolve_data_source_id
+from src.etl.forecast_run_registry import upsert_forecast_run
 
 settings = get_settings()
 
@@ -302,32 +313,118 @@ def _extract_artifact_parts(artifact: dict) -> tuple:
     return model, categorical_columns, feature_columns, target_transform, floor, cap, sigma
 
 
-def forecast_for_store(store_id: int, horizon_days: int) -> list[dict]:
+def _new_run_id(prefix: str) -> str:
+    return f"{prefix}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
+
+
+def _record_forecast_run(
+    *,
+    run_id: str,
+    run_type: str,
+    status: str,
+    data_source_id: int,
+    store_id: int | None,
+    request_json: dict[str, Any],
+    summary_json: dict[str, Any] | None = None,
+    error_message: str | None = None,
+    created_at: datetime,
+) -> None:
+    upsert_forecast_run(
+        {
+            "run_id": run_id,
+            "created_at": created_at,
+            "run_type": run_type,
+            "status": status,
+            "data_source_id": data_source_id,
+            "store_id": store_id,
+            "request_json": request_json,
+            "summary_json": summary_json or {},
+            "error_message": error_message,
+        }
+    )
+
+
+def forecast_for_store(
+    store_id: int,
+    horizon_days: int,
+    data_source_id: int | None = None,
+    *,
+    _record_run: bool = True,
+) -> list[dict]:
     if store_id <= 0:
         raise ValueError("store_id must be positive")
     _validate_horizon(horizon_days)
 
-    artifact = _load_artifact()
-    model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
+    resolved_data_source_id = resolve_data_source_id(data_source_id)
+    run_id = _new_run_id("forecast") if _record_run else None
+    started_at = datetime.now(timezone.utc)
+    request_json = {
+        "store_id": int(store_id),
+        "horizon_days": int(horizon_days),
+        "data_source_id": resolved_data_source_id,
+    }
+    if _record_run and run_id is not None:
+        _record_forecast_run(
+            run_id=run_id,
+            run_type="forecast",
+            status="RUNNING",
+            data_source_id=resolved_data_source_id,
+            store_id=store_id,
+            request_json=request_json,
+            created_at=started_at,
+        )
 
-    history = _fetch_history(engine, store_id=store_id, history_days=90)
-    store_meta = _fetch_store_meta(engine, store_id=store_id)
+    try:
+        artifact = _load_artifact()
+        model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
 
-    baseline_controls = ForecastControls()
-    return _run_recursive_forecast(
-        model=model,
-        categorical_columns=categorical_columns,
-        feature_columns=feature_columns,
-        target_transform=target_transform,
-        floor=floor,
-        cap=cap,
-        sigma=sigma,
-        store_id=store_id,
-        horizon_days=horizon_days,
-        history=history,
-        store_meta=store_meta,
-        controls=baseline_controls,
-    )
+        history = _fetch_history(engine, store_id=store_id, history_days=90)
+        store_meta = _fetch_store_meta(engine, store_id=store_id)
+
+        baseline_controls = ForecastControls()
+        result = _run_recursive_forecast(
+            model=model,
+            categorical_columns=categorical_columns,
+            feature_columns=feature_columns,
+            target_transform=target_transform,
+            floor=floor,
+            cap=cap,
+            sigma=sigma,
+            store_id=store_id,
+            horizon_days=horizon_days,
+            history=history,
+            store_meta=store_meta,
+            controls=baseline_controls,
+        )
+        if _record_run and run_id is not None:
+            _record_forecast_run(
+                run_id=run_id,
+                run_type="forecast",
+                status="COMPLETED",
+                data_source_id=resolved_data_source_id,
+                store_id=store_id,
+                request_json=request_json,
+                summary_json={
+                    "points_count": len(result),
+                    "total_predicted_sales": float(sum(float(row["predicted_sales"]) for row in result)),
+                },
+                created_at=started_at,
+            )
+        return result
+    except Exception as exc:
+        if _record_run and run_id is not None:
+            _record_forecast_run(
+                run_id=run_id,
+                run_type="forecast",
+                status="FAILED",
+                data_source_id=resolved_data_source_id,
+                store_id=store_id,
+                request_json=request_json,
+                summary_json={},
+                error_message=str(exc),
+                created_at=started_at,
+            )
+        raise
 
 
 def _summarize_store_series(store_id: int, points: list[dict]) -> dict:
@@ -351,57 +448,111 @@ def _summarize_store_series(store_id: int, points: list[dict]) -> dict:
     }
 
 
-def forecast_batch_for_stores(store_ids: list[int], horizon_days: int) -> dict:
+def forecast_batch_for_stores(
+    store_ids: list[int],
+    horizon_days: int,
+    data_source_id: int | None = None,
+) -> dict:
     normalized_store_ids = _validate_store_ids(store_ids)
     _validate_horizon(horizon_days)
 
-    store_series: dict[int, list[dict]] = {}
-    for store_id in normalized_store_ids:
-        store_series[store_id] = forecast_for_store(store_id=store_id, horizon_days=horizon_days)
-
-    store_summaries = [_summarize_store_series(store_id, points) for store_id, points in store_series.items()]
-
-    portfolio_series: list[dict] = []
-    for index in range(horizon_days):
-        date_value = next(iter(store_series.values()))[index]["date"]
-        predicted_sales = float(sum(points[index]["predicted_sales"] for points in store_series.values()))
-        predicted_lower = float(sum(points[index]["predicted_lower"] for points in store_series.values()))
-        predicted_upper = float(sum(points[index]["predicted_upper"] for points in store_series.values()))
-        portfolio_series.append(
-            {
-                "date": date_value,
-                "predicted_sales": predicted_sales,
-                "predicted_lower": predicted_lower,
-                "predicted_upper": predicted_upper,
-            }
-        )
-
-    portfolio_total = float(sum(row["predicted_sales"] for row in portfolio_series))
-    portfolio_avg_daily = float(portfolio_total / horizon_days) if horizon_days > 0 else 0.0
-    portfolio_peak_point = max(portfolio_series, key=lambda row: row["predicted_sales"]) if portfolio_series else None
-    interval_widths = [
-        row["predicted_upper"] - row["predicted_lower"]
-        for row in portfolio_series
-        if row.get("predicted_upper") is not None and row.get("predicted_lower") is not None
-    ]
-
-    return {
-        "request": {
-            "store_ids": normalized_store_ids,
-            "horizon_days": horizon_days,
-        },
-        "store_summaries": store_summaries,
-        "portfolio_summary": {
-            "stores_count": len(normalized_store_ids),
-            "horizon_days": horizon_days,
-            "total_predicted_sales": portfolio_total,
-            "avg_daily_sales": portfolio_avg_daily,
-            "peak_date": portfolio_peak_point["date"] if portfolio_peak_point else None,
-            "peak_sales": float(portfolio_peak_point["predicted_sales"]) if portfolio_peak_point else 0.0,
-            "avg_interval_width": float(np.mean(interval_widths)) if interval_widths else 0.0,
-        },
-        "portfolio_series": portfolio_series,
+    resolved_data_source_id = resolve_data_source_id(data_source_id)
+    run_id = _new_run_id("forecast_batch")
+    started_at = datetime.now(timezone.utc)
+    request_json = {
+        "store_ids": normalized_store_ids,
+        "horizon_days": int(horizon_days),
+        "data_source_id": resolved_data_source_id,
     }
+    _record_forecast_run(
+        run_id=run_id,
+        run_type="batch",
+        status="RUNNING",
+        data_source_id=resolved_data_source_id,
+        store_id=None,
+        request_json=request_json,
+        created_at=started_at,
+    )
+
+    try:
+        store_series: dict[int, list[dict]] = {}
+        for store_id in normalized_store_ids:
+            store_series[store_id] = forecast_for_store(
+                store_id=store_id,
+                horizon_days=horizon_days,
+                data_source_id=resolved_data_source_id,
+                _record_run=False,
+            )
+
+        store_summaries = [_summarize_store_series(store_id, points) for store_id, points in store_series.items()]
+
+        portfolio_series: list[dict] = []
+        for index in range(horizon_days):
+            date_value = next(iter(store_series.values()))[index]["date"]
+            predicted_sales = float(sum(points[index]["predicted_sales"] for points in store_series.values()))
+            predicted_lower = float(sum(points[index]["predicted_lower"] for points in store_series.values()))
+            predicted_upper = float(sum(points[index]["predicted_upper"] for points in store_series.values()))
+            portfolio_series.append(
+                {
+                    "date": date_value,
+                    "predicted_sales": predicted_sales,
+                    "predicted_lower": predicted_lower,
+                    "predicted_upper": predicted_upper,
+                }
+            )
+
+        portfolio_total = float(sum(row["predicted_sales"] for row in portfolio_series))
+        portfolio_avg_daily = float(portfolio_total / horizon_days) if horizon_days > 0 else 0.0
+        portfolio_peak_point = max(portfolio_series, key=lambda row: row["predicted_sales"]) if portfolio_series else None
+        interval_widths = [
+            row["predicted_upper"] - row["predicted_lower"]
+            for row in portfolio_series
+            if row.get("predicted_upper") is not None and row.get("predicted_lower") is not None
+        ]
+
+        response = {
+            "request": request_json,
+            "store_summaries": store_summaries,
+            "portfolio_summary": {
+                "stores_count": len(normalized_store_ids),
+                "horizon_days": horizon_days,
+                "total_predicted_sales": portfolio_total,
+                "avg_daily_sales": portfolio_avg_daily,
+                "peak_date": portfolio_peak_point["date"] if portfolio_peak_point else None,
+                "peak_sales": float(portfolio_peak_point["predicted_sales"]) if portfolio_peak_point else 0.0,
+                "avg_interval_width": float(np.mean(interval_widths)) if interval_widths else 0.0,
+            },
+            "portfolio_series": portfolio_series,
+        }
+
+        _record_forecast_run(
+            run_id=run_id,
+            run_type="batch",
+            status="COMPLETED",
+            data_source_id=resolved_data_source_id,
+            store_id=None,
+            request_json=request_json,
+            summary_json={
+                "stores_count": len(normalized_store_ids),
+                "total_predicted_sales": portfolio_total,
+                "avg_daily_sales": portfolio_avg_daily,
+            },
+            created_at=started_at,
+        )
+        return response
+    except Exception as exc:
+        _record_forecast_run(
+            run_id=run_id,
+            run_type="batch",
+            status="FAILED",
+            data_source_id=resolved_data_source_id,
+            store_id=None,
+            request_json=request_json,
+            summary_json={},
+            error_message=str(exc),
+            created_at=started_at,
+        )
+        raise
 
 
 def forecast_scenario_for_store(
@@ -413,94 +564,152 @@ def forecast_scenario_for_store(
     school_holiday: int,
     demand_shift_pct: float,
     confidence_level: float,
+    data_source_id: int | None = None,
+    _record_run: bool = True,
 ) -> dict:
     if store_id <= 0:
         raise ValueError("store_id must be positive")
     _validate_horizon(horizon_days)
-
-    artifact = _load_artifact()
-    model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
-
-    history = _fetch_history(engine, store_id=store_id, history_days=90)
-    store_meta = _fetch_store_meta(engine, store_id=store_id)
-
-    baseline = _run_recursive_forecast(
-        model=model,
-        categorical_columns=categorical_columns,
-        feature_columns=feature_columns,
-        target_transform=target_transform,
-        floor=floor,
-        cap=cap,
-        sigma=sigma,
-        store_id=store_id,
-        horizon_days=horizon_days,
-        history=history,
-        store_meta=store_meta,
-        controls=ForecastControls(confidence_level=confidence_level),
-    )
-
-    scenario_controls = ForecastControls(
-        promo_mode=promo_mode,
-        weekend_open=weekend_open,
-        school_holiday=school_holiday,
-        demand_shift_pct=demand_shift_pct,
-        confidence_level=confidence_level,
-    )
-    scenario = _run_recursive_forecast(
-        model=model,
-        categorical_columns=categorical_columns,
-        feature_columns=feature_columns,
-        target_transform=target_transform,
-        floor=floor,
-        cap=cap,
-        sigma=sigma,
-        store_id=store_id,
-        horizon_days=horizon_days,
-        history=history,
-        store_meta=store_meta,
-        controls=scenario_controls,
-    )
-
-    points: list[dict] = []
-    for baseline_row, scenario_row in zip(baseline, scenario, strict=True):
-        delta = float(scenario_row["predicted_sales"] - baseline_row["predicted_sales"])
-        points.append(
-            {
-                "date": baseline_row["date"],
-                "baseline_sales": float(baseline_row["predicted_sales"]),
-                "scenario_sales": float(scenario_row["predicted_sales"]),
-                "delta_sales": delta,
-                "scenario_lower": float(scenario_row["predicted_lower"]),
-                "scenario_upper": float(scenario_row["predicted_upper"]),
-            }
+    resolved_data_source_id = resolve_data_source_id(data_source_id)
+    run_id = _new_run_id("forecast_scenario") if _record_run else None
+    started_at = datetime.now(timezone.utc)
+    request_json = {
+        "store_id": int(store_id),
+        "horizon_days": int(horizon_days),
+        "promo_mode": str(promo_mode),
+        "weekend_open": bool(weekend_open),
+        "school_holiday": int(school_holiday),
+        "demand_shift_pct": float(demand_shift_pct),
+        "confidence_level": float(confidence_level),
+        "data_source_id": resolved_data_source_id,
+    }
+    if _record_run and run_id is not None:
+        _record_forecast_run(
+            run_id=run_id,
+            run_type="scenario",
+            status="RUNNING",
+            data_source_id=resolved_data_source_id,
+            store_id=store_id,
+            request_json=request_json,
+            created_at=started_at,
         )
 
-    total_baseline = float(sum(row["baseline_sales"] for row in points))
-    total_scenario = float(sum(row["scenario_sales"] for row in points))
-    total_delta = float(total_scenario - total_baseline)
-    uplift_pct = float((total_delta / total_baseline) * 100.0) if total_baseline > 0 else 0.0
-    avg_daily_delta = float(total_delta / horizon_days) if horizon_days > 0 else 0.0
+    try:
+        artifact = _load_artifact()
+        model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
 
-    max_delta_point = max(points, key=lambda row: row["delta_sales"]) if points else None
+        history = _fetch_history(engine, store_id=store_id, history_days=90)
+        store_meta = _fetch_store_meta(engine, store_id=store_id)
 
-    return {
-        "request": {
-            "store_id": store_id,
-            "horizon_days": horizon_days,
-            "promo_mode": promo_mode,
-            "weekend_open": weekend_open,
-            "school_holiday": school_holiday,
-            "demand_shift_pct": demand_shift_pct,
-            "confidence_level": confidence_level,
-        },
-        "summary": {
-            "total_baseline_sales": total_baseline,
-            "total_scenario_sales": total_scenario,
-            "total_delta_sales": total_delta,
-            "uplift_pct": uplift_pct,
-            "avg_daily_delta": avg_daily_delta,
-            "max_delta_date": max_delta_point["date"] if max_delta_point else None,
-            "max_delta_value": float(max_delta_point["delta_sales"]) if max_delta_point else 0.0,
-        },
-        "points": points,
-    }
+        baseline = _run_recursive_forecast(
+            model=model,
+            categorical_columns=categorical_columns,
+            feature_columns=feature_columns,
+            target_transform=target_transform,
+            floor=floor,
+            cap=cap,
+            sigma=sigma,
+            store_id=store_id,
+            horizon_days=horizon_days,
+            history=history,
+            store_meta=store_meta,
+            controls=ForecastControls(confidence_level=confidence_level),
+        )
+
+        scenario_controls = ForecastControls(
+            promo_mode=promo_mode,
+            weekend_open=weekend_open,
+            school_holiday=school_holiday,
+            demand_shift_pct=demand_shift_pct,
+            confidence_level=confidence_level,
+        )
+        scenario = _run_recursive_forecast(
+            model=model,
+            categorical_columns=categorical_columns,
+            feature_columns=feature_columns,
+            target_transform=target_transform,
+            floor=floor,
+            cap=cap,
+            sigma=sigma,
+            store_id=store_id,
+            horizon_days=horizon_days,
+            history=history,
+            store_meta=store_meta,
+            controls=scenario_controls,
+        )
+
+        points: list[dict] = []
+        for baseline_row, scenario_row in zip(baseline, scenario, strict=True):
+            delta = float(scenario_row["predicted_sales"] - baseline_row["predicted_sales"])
+            points.append(
+                {
+                    "date": baseline_row["date"],
+                    "baseline_sales": float(baseline_row["predicted_sales"]),
+                    "scenario_sales": float(scenario_row["predicted_sales"]),
+                    "delta_sales": delta,
+                    "scenario_lower": float(scenario_row["predicted_lower"]),
+                    "scenario_upper": float(scenario_row["predicted_upper"]),
+                }
+            )
+
+        total_baseline = float(sum(row["baseline_sales"] for row in points))
+        total_scenario = float(sum(row["scenario_sales"] for row in points))
+        total_delta = float(total_scenario - total_baseline)
+        uplift_pct = float((total_delta / total_baseline) * 100.0) if total_baseline > 0 else 0.0
+        avg_daily_delta = float(total_delta / horizon_days) if horizon_days > 0 else 0.0
+
+        max_delta_point = max(points, key=lambda row: row["delta_sales"]) if points else None
+
+        response = {
+            "request": {
+                "store_id": store_id,
+                "horizon_days": horizon_days,
+                "promo_mode": promo_mode,
+                "weekend_open": weekend_open,
+                "school_holiday": school_holiday,
+                "demand_shift_pct": demand_shift_pct,
+                "confidence_level": confidence_level,
+                "data_source_id": resolved_data_source_id,
+            },
+            "summary": {
+                "total_baseline_sales": total_baseline,
+                "total_scenario_sales": total_scenario,
+                "total_delta_sales": total_delta,
+                "uplift_pct": uplift_pct,
+                "avg_daily_delta": avg_daily_delta,
+                "max_delta_date": max_delta_point["date"] if max_delta_point else None,
+                "max_delta_value": float(max_delta_point["delta_sales"]) if max_delta_point else 0.0,
+            },
+            "points": points,
+        }
+
+        if _record_run and run_id is not None:
+            _record_forecast_run(
+                run_id=run_id,
+                run_type="scenario",
+                status="COMPLETED",
+                data_source_id=resolved_data_source_id,
+                store_id=store_id,
+                request_json=request_json,
+                summary_json={
+                    "points_count": len(points),
+                    "uplift_pct": uplift_pct,
+                    "total_delta_sales": total_delta,
+                },
+                created_at=started_at,
+            )
+        return response
+    except Exception as exc:
+        if _record_run and run_id is not None:
+            _record_forecast_run(
+                run_id=run_id,
+                run_type="scenario",
+                status="FAILED",
+                data_source_id=resolved_data_source_id,
+                store_id=store_id,
+                request_json=request_json,
+                summary_json={},
+                error_message=str(exc),
+                created_at=started_at,
+            )
+        raise

@@ -26,15 +26,25 @@ _REGISTRY_TABLE = sa.Table(
     sa.Column("summary_json", sa.JSON, nullable=False),
     sa.Column("blocked", sa.Boolean, nullable=False),
     sa.Column("block_reason", sa.Text, nullable=True),
+    sa.Column("data_source_id", sa.Integer, nullable=True),
+    sa.Column("contract_id", sa.String(128), nullable=True),
+    sa.Column("contract_version", sa.String(64), nullable=True),
     sa.PrimaryKeyConstraint("run_id", "source_name", name="pk_preflight_run_registry"),
     sa.Index("ix_preflight_registry_created_at", "created_at"),
     sa.Index("ix_preflight_registry_source_name", "source_name"),
     sa.Index("ix_preflight_registry_final_status", "final_status"),
     sa.Index("ix_preflight_registry_mode", "mode"),
+    sa.Index("ix_preflight_registry_data_source", "data_source_id"),
 )
 
 _ENGINES: dict[str, sa.Engine] = {}
 _INITIALIZED_DATABASE_URLS: set[str] = set()
+
+_BACKWARD_COMPAT_COLUMNS: dict[str, str] = {
+    "data_source_id": "INTEGER",
+    "contract_id": "VARCHAR(128)",
+    "contract_version": "VARCHAR(64)",
+}
 
 
 def _resolve_database_url(database_url: str | None = None) -> str:
@@ -55,8 +65,27 @@ def _ensure_registry_table(database_url: str | None = None) -> sa.Engine:
     engine = _get_engine(resolved_url)
     if resolved_url not in _INITIALIZED_DATABASE_URLS:
         _METADATA.create_all(engine, tables=[_REGISTRY_TABLE], checkfirst=True)
+        _add_missing_columns(engine)
+        _ensure_indexes(engine)
         _INITIALIZED_DATABASE_URLS.add(resolved_url)
     return engine
+
+
+def _add_missing_columns(engine: sa.Engine) -> None:
+    inspector = sa.inspect(engine)
+    existing = {column["name"] for column in inspector.get_columns(_TABLE_NAME)}
+    missing = [(name, ddl) for name, ddl in _BACKWARD_COMPAT_COLUMNS.items() if name not in existing]
+    if not missing:
+        return
+
+    with engine.begin() as conn:
+        for column_name, ddl in missing:
+            conn.execute(sa.text(f"ALTER TABLE {_TABLE_NAME} ADD COLUMN {column_name} {ddl}"))
+
+
+def _ensure_indexes(engine: sa.Engine) -> None:
+    for index in _REGISTRY_TABLE.indexes:
+        index.create(bind=engine, checkfirst=True)
 
 
 def _serialize_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -86,6 +115,9 @@ def insert_preflight_run(record: dict[str, Any], database_url: str | None = None
     payload["summary_json"] = payload.get("summary_json") or {}
     payload["blocked"] = bool(payload.get("blocked", False))
     payload["used_unified"] = bool(payload.get("used_unified", False))
+    payload["data_source_id"] = int(payload["data_source_id"]) if payload.get("data_source_id") is not None else None
+    payload["contract_id"] = str(payload.get("contract_id", "")).strip() or None
+    payload["contract_version"] = str(payload.get("contract_version", "")).strip() or None
 
     with engine.begin() as conn:
         try:
@@ -106,6 +138,7 @@ def insert_preflight_run(record: dict[str, Any], database_url: str | None = None
 def list_preflight_runs(
     limit: int = 20,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     database_url: str | None = None,
 ) -> list[dict[str, Any]]:
     """List preflight run records ordered by latest first."""
@@ -116,6 +149,8 @@ def list_preflight_runs(
     query = sa.select(_REGISTRY_TABLE).order_by(_REGISTRY_TABLE.c.created_at.desc()).limit(normalized_limit)
     if source_name:
         query = query.where(_REGISTRY_TABLE.c.source_name == source_name)
+    if data_source_id is not None:
+        query = query.where(_REGISTRY_TABLE.c.data_source_id == int(data_source_id))
 
     with engine.connect() as conn:
         rows = conn.execute(query).mappings().all()
@@ -125,6 +160,7 @@ def list_preflight_runs(
 def query_preflight_runs(
     *,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     mode: str | None = None,
     final_status: str | None = None,
     date_from: datetime | None = None,
@@ -139,6 +175,8 @@ def query_preflight_runs(
 
     if source_name:
         query = query.where(_REGISTRY_TABLE.c.source_name == source_name)
+    if data_source_id is not None:
+        query = query.where(_REGISTRY_TABLE.c.data_source_id == int(data_source_id))
     if mode:
         query = query.where(_REGISTRY_TABLE.c.mode == mode)
     if final_status:
@@ -202,15 +240,26 @@ def get_preflight_run(run_id: str, database_url: str | None = None) -> dict[str,
 
 def get_latest_preflight(
     source_name: str | None = None,
+    data_source_id: int | None = None,
     database_url: str | None = None,
 ) -> dict[str, Any] | None:
     """Get latest preflight (grouped run when source_name is None, source record otherwise)."""
 
     if source_name:
-        rows = list_preflight_runs(limit=1, source_name=source_name, database_url=database_url)
+        rows = list_preflight_runs(
+            limit=1,
+            source_name=source_name,
+            data_source_id=data_source_id,
+            database_url=database_url,
+        )
         return rows[0] if rows else None
 
-    rows = list_preflight_runs(limit=1, source_name=None, database_url=database_url)
+    rows = list_preflight_runs(
+        limit=1,
+        source_name=None,
+        data_source_id=data_source_id,
+        database_url=database_url,
+    )
     if not rows:
         return None
     return get_preflight_run(str(rows[0]["run_id"]), database_url=database_url)

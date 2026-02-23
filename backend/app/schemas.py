@@ -46,11 +46,13 @@ class PromoImpactPoint(BaseModel):
 class ForecastRequest(BaseModel):
     store_id: int = Field(..., gt=0)
     horizon_days: int = Field(30, ge=1, le=180)
+    data_source_id: int | None = Field(default=None, gt=0)
 
 
 class ForecastBatchRequest(BaseModel):
     store_ids: list[int] = Field(..., min_length=1, max_length=50)
     horizon_days: int = Field(30, ge=1, le=180)
+    data_source_id: int | None = Field(default=None, gt=0)
 
 
 class ForecastPoint(BaseModel):
@@ -68,6 +70,7 @@ class ForecastScenarioRequest(BaseModel):
     school_holiday: int = Field(0, ge=0, le=1)
     demand_shift_pct: float = Field(0.0, ge=-50.0, le=50.0)
     confidence_level: float = Field(0.8, ge=0.5, le=0.99)
+    data_source_id: int | None = Field(default=None, gt=0)
 
 
 class ForecastScenarioPoint(BaseModel):
@@ -203,6 +206,9 @@ class PreflightRunSummary(BaseModel):
     artifact_dir: str | None = None
     validation_report_path: str | None = None
     manifest_path: str | None = None
+    data_source_id: int | None = None
+    contract_id: str | None = None
+    contract_version: str | None = None
 
 
 class PreflightRunsListResponse(BaseModel):
@@ -293,6 +299,7 @@ class PreflightManifestArtifactResponse(BaseModel):
 
 class PreflightAnalyticsFilters(BaseModel):
     source_name: str | None = None
+    data_source_id: int | None = None
     mode: str | None = None
     final_status: str | None = None
     date_from: str | None = None
@@ -602,3 +609,183 @@ class PreflightNotificationAttemptsResponse(BaseModel):
     limit: int
     filters: PreflightNotificationAnalyticsFilters
     items: list[PreflightNotificationAttemptItemResponse] = Field(default_factory=list)
+
+
+class DataSourceCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=128)
+    description: str | None = None
+    source_type: str = Field(default="cms", min_length=1, max_length=64)
+    related_contract_id: str | None = Field(default=None, max_length=128)
+    related_contract_version: str | None = Field(default=None, max_length=64)
+    is_active: bool = True
+    is_default: bool = False
+
+
+class DataSourceResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None = None
+    source_type: str
+    related_contract_id: str | None = None
+    related_contract_version: str | None = None
+    is_active: bool
+    is_default: bool
+    created_at: datetime
+    updated_at: datetime
+    last_preflight_status: str | None = None
+    last_preflight_at: datetime | None = None
+    last_preflight_run_id: str | None = None
+
+
+class ContractSummaryResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    is_active: bool = True
+    latest_version: str | None = None
+    versions_count: int = 0
+
+
+class ContractVersionSummaryResponse(BaseModel):
+    version: str
+    created_at: str | None = None
+    changed_by: str | None = None
+    changelog: str | None = None
+    schema_path: str
+
+
+class ContractProfileSchemaResponse(BaseModel):
+    required_columns: list[str] = Field(default_factory=list)
+    aliases: dict[str, list[str]] = Field(default_factory=dict)
+    dtypes: dict[str, str] = Field(default_factory=dict)
+
+
+class ContractVersionDetailResponse(ContractVersionSummaryResponse):
+    contract_version: str
+    profiles: dict[str, ContractProfileSchemaResponse] = Field(default_factory=dict)
+
+
+class ContractDetailResponse(BaseModel):
+    id: str
+    name: str
+    description: str | None = None
+    is_active: bool = True
+    versions: list[ContractVersionSummaryResponse] = Field(default_factory=list)
+
+
+class MLPeriodResponse(BaseModel):
+    start: date | None = None
+    end: date | None = None
+
+
+class MLExperimentListItemResponse(BaseModel):
+    experiment_id: str
+    data_source_id: int | None = None
+    model_type: str
+    hyperparameters: dict[str, Any] = Field(default_factory=dict)
+    training_period: MLPeriodResponse
+    validation_period: MLPeriodResponse
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    status: str
+    artifact_path: str | None = None
+    metadata_path: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MLExperimentsResponse(BaseModel):
+    items: list[MLExperimentListItemResponse] = Field(default_factory=list)
+    limit: int
+    data_source_id: int | None = None
+
+
+class ScenarioSegmentRequest(BaseModel):
+    store_type: str | None = Field(default=None, max_length=32)
+    assortment: str | None = Field(default=None, max_length=32)
+    promo2: int | None = Field(default=None, ge=0, le=1)
+
+
+class ScenarioRunRequestV2(BaseModel):
+    store_id: int | None = Field(default=None, gt=0)
+    segment: ScenarioSegmentRequest | None = None
+    price_change_pct: float = Field(default=0.0, ge=-80.0, le=200.0)
+    promo_mode: Literal["as_is", "always_on", "weekends_only", "off"] = "as_is"
+    weekend_open: bool = True
+    school_holiday: int = Field(default=0, ge=0, le=1)
+    demand_shift_pct: float = Field(default=0.0, ge=-80.0, le=200.0)
+    confidence_level: float = Field(default=0.8, ge=0.5, le=0.99)
+    horizon_days: int = Field(default=30, ge=1, le=180)
+    data_source_id: int | None = Field(default=None, gt=0)
+
+
+class ScenarioTargetResponse(BaseModel):
+    mode: Literal["store", "segment"]
+    store_id: int | None = None
+    segment: dict[str, Any] | None = None
+    stores_count: int | None = None
+    store_ids: list[int] | None = None
+
+
+class ScenarioAssumptionsResponse(BaseModel):
+    price_change_pct: float
+    price_elasticity: float
+    price_effect_pct: float
+    effective_demand_shift_pct: float
+
+
+class ScenarioRunResponseV2(BaseModel):
+    run_id: str
+    target: ScenarioTargetResponse
+    assumptions: ScenarioAssumptionsResponse
+    request: dict[str, Any]
+    summary: ForecastScenarioSummary
+    points: list[ForecastScenarioPoint] = Field(default_factory=list)
+
+
+class NotificationEndpointResponse(BaseModel):
+    id: str
+    channel_type: str
+    enabled: bool
+    target_hint: str | None = None
+    has_target_url: bool
+    timeout_seconds: int
+    max_attempts: int
+    backoff_seconds: int
+    enabled_event_types: list[str] = Field(default_factory=list)
+
+
+class NotificationEndpointsResponse(BaseModel):
+    version: str
+    path: str
+    items: list[NotificationEndpointResponse] = Field(default_factory=list)
+
+
+class NotificationDeliveryItemResponse(BaseModel):
+    attempt_id: str
+    outbox_item_id: str
+    event_id: str | None = None
+    delivery_id: str | None = None
+    replayed_from_id: str | None = None
+    channel_type: str
+    channel_target: str
+    event_type: str
+    alert_id: str
+    policy_id: str
+    source_name: str | None = None
+    attempt_number: int
+    attempt_status: str
+    started_at: datetime
+    completed_at: datetime | None = None
+    duration_ms: int | None = None
+    http_status: int | None = None
+    error_code: str | None = None
+    error_message_safe: str | None = None
+    created_at: datetime
+
+
+class NotificationDeliveryPageResponse(BaseModel):
+    page: int
+    page_size: int
+    total: int
+    status: str | None = None
+    items: list[NotificationDeliveryItemResponse] = Field(default_factory=list)

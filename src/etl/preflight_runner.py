@@ -98,6 +98,9 @@ def _persist_registry_record(
     semantic_report: dict[str, object] | None,
     blocked: bool,
     block_reason: str | None,
+    data_source_id: int | None,
+    contract_id: str | None,
+    contract_version: str | None,
 ) -> None:
     final_status = _derive_final_status(result.validation_status, result.semantic_status)
     summary_json = _build_registry_summary(
@@ -122,6 +125,9 @@ def _persist_registry_record(
         "summary_json": summary_json,
         "blocked": blocked,
         "block_reason": block_reason,
+        "data_source_id": data_source_id,
+        "contract_id": contract_id,
+        "contract_version": contract_version,
     }
 
     try:
@@ -146,6 +152,8 @@ def run_preflight(
     artifact_root: str | Path,
     source_name: str,
     run_id: str | None = None,
+    data_source_id: int | None = None,
+    contract_id: str | None = None,
 ) -> PreflightResult:
     """Run preflight validation/unification for one input file.
 
@@ -232,6 +240,9 @@ def run_preflight(
             semantic_report=None,
             blocked=blocked,
             block_reason=block_reason,
+            data_source_id=data_source_id,
+            contract_id=contract_id,
+            contract_version=contract.contract_version,
         )
         if resolved_mode == "enforce":
             raise PreflightEnforcementError(
@@ -301,6 +312,9 @@ def run_preflight(
         semantic_report=semantic_report,
         blocked=blocked,
         block_reason=block_reason,
+        data_source_id=data_source_id,
+        contract_id=contract_id,
+        contract_version=contract.contract_version,
     )
 
     if blocked:

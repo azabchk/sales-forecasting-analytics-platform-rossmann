@@ -16,7 +16,11 @@ router = APIRouter()
 @router.post("/forecast", response_model=list[ForecastPoint])
 def forecast_sales(payload: ForecastRequest) -> list[ForecastPoint]:
     try:
-        return forecast_for_store(store_id=payload.store_id, horizon_days=payload.horizon_days)
+        return forecast_for_store(
+            store_id=payload.store_id,
+            horizon_days=payload.horizon_days,
+            data_source_id=payload.data_source_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
@@ -36,6 +40,7 @@ def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenari
             school_holiday=payload.school_holiday,
             demand_shift_pct=payload.demand_shift_pct,
             confidence_level=payload.confidence_level,
+            data_source_id=payload.data_source_id,
         )
         return ForecastScenarioResponse.model_validate(result)
     except ValueError as exc:
@@ -49,7 +54,11 @@ def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenari
 @router.post("/forecast/batch", response_model=ForecastBatchResponse)
 def forecast_sales_batch(payload: ForecastBatchRequest) -> ForecastBatchResponse:
     try:
-        result = forecast_batch_for_stores(store_ids=payload.store_ids, horizon_days=payload.horizon_days)
+        result = forecast_batch_for_stores(
+            store_ids=payload.store_ids,
+            horizon_days=payload.horizon_days,
+            data_source_id=payload.data_source_id,
+        )
         return ForecastBatchResponse.model_validate(result)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
