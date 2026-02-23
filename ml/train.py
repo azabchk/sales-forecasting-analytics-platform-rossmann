@@ -3,7 +3,9 @@
 import argparse
 import json
 import os
-from datetime import datetime
+import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import joblib
@@ -17,6 +19,13 @@ from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, root_mean_squared_error
 
 from features import build_training_frame, encode_features
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.etl.data_source_registry import resolve_data_source_id  # noqa: E402
+from src.etl.ml_experiment_registry import upsert_experiment  # noqa: E402
 
 
 def load_config(config_path: str) -> tuple[dict, Path]:
@@ -124,6 +133,22 @@ def get_catboost_param_grid(cfg: dict) -> list[dict]:
     return normalized or default_grid
 
 
+def resolve_optional_data_source_id() -> int:
+    raw_value = str(os.getenv("DATA_SOURCE_ID", "")).strip()
+    if not raw_value:
+        return resolve_data_source_id(None)
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise ValueError("DATA_SOURCE_ID must be an integer when provided") from exc
+    return resolve_data_source_id(parsed)
+
+
+def is_smoke_mode_enabled() -> bool:
+    raw = str(os.getenv("ML_SMOKE_MODE", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train sales forecasting model")
     parser.add_argument("--config", required=True, help="Path to config.yaml")
@@ -137,207 +162,333 @@ def main() -> None:
     if not db_url:
         raise ValueError("DATABASE_URL not found in environment")
 
-    engine = sa.create_engine(db_url)
-    raw_df = load_training_data(engine)
+    data_source_id = resolve_optional_data_source_id()
+    experiment_id = f"ml_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:8]}"
+    experiment_started_at = datetime.now(timezone.utc)
 
-    framed = build_training_frame(raw_df)
     validation_days = int(cfg["training"].get("validation_days", 60))
     target_transform = str(cfg["training"].get("target_transform", "log1p"))
     prediction_floor = float(cfg["training"].get("prediction_floor", 0.0))
     prediction_cap_quantile = float(cfg["training"].get("prediction_cap_quantile", 0.997))
     early_stopping_rounds = int(cfg["training"].get("early_stopping_rounds", 60))
-
-    train_df, val_df = time_split(framed, validation_days=validation_days)
-    if train_df.empty or val_df.empty:
-        raise ValueError("Insufficient data for time-based split")
-
-    feature_cols = [
-        "store_id",
-        "promo",
-        "school_holiday",
-        "open",
-        "competition_distance",
-        "promo2",
-        "day_of_week",
-        "month",
-        "quarter",
-        "week_of_year",
-        "is_weekend",
-        "days_since_start",
-        "lag_1",
-        "lag_7",
-        "lag_14",
-        "lag_28",
-        "rolling_mean_7",
-        "rolling_mean_14",
-        "rolling_mean_28",
-        "rolling_std_7",
-        "rolling_std_14",
-        "rolling_std_28",
-        "lag_1_to_mean_7_ratio",
-        "state_holiday",
-        "store_type",
-        "assortment",
-    ]
-
-    categorical_cols = ["state_holiday", "store_type", "assortment"]
-
-    x_train_raw = train_df[feature_cols].copy()
-    y_train_raw = train_df["sales"].astype(float)
-    y_train_model = np.log1p(y_train_raw) if target_transform == "log1p" else y_train_raw
-
-    x_val_raw = val_df[feature_cols].copy()
-    y_val_raw = val_df["sales"].astype(float)
-    y_val_model = np.log1p(y_val_raw) if target_transform == "log1p" else y_val_raw
-
-    prediction_cap = float(np.quantile(train_df["sales"].astype(float), prediction_cap_quantile))
-
-    x_train, model_feature_columns = encode_features(x_train_raw, categorical_cols)
-    x_val, _ = encode_features(x_val_raw, categorical_cols, feature_columns=model_feature_columns)
-
-    ridge = Ridge(random_state=int(cfg["training"].get("random_state", 42)))
-    ridge.fit(x_train, y_train_model)
-    ridge_pred = ridge.predict(x_val)
-    ridge_pred = inverse_target_transform(ridge_pred, target_transform)
-    ridge_pred = postprocess_predictions(ridge_pred, prediction_floor, prediction_cap)
-    ridge_metrics = evaluate_model(y_val_raw, ridge_pred)
-
+    random_state = int(cfg["training"].get("random_state", 42))
     catboost_grid = get_catboost_param_grid(cfg)
-    catboost_candidates: list[dict] = []
-    best_catboost_model: CatBoostRegressor | None = None
-    best_catboost_metrics: dict | None = None
-    best_catboost_params: dict | None = None
 
-    for params in catboost_grid:
-        model = CatBoostRegressor(
-            loss_function="RMSE",
-            random_seed=int(cfg["training"].get("random_state", 42)),
-            verbose=False,
-            **params,
-        )
-
-        model.fit(
-            x_train,
-            y_train_model,
-            eval_set=(x_val, y_val_model),
-            use_best_model=True,
-            early_stopping_rounds=early_stopping_rounds,
-        )
-
-        pred = model.predict(x_val)
-        pred = inverse_target_transform(pred, target_transform)
-        pred = postprocess_predictions(pred, prediction_floor, prediction_cap)
-        metrics = evaluate_model(y_val_raw, pred)
-
-        candidate = {
-            "params": params,
-            "metrics": metrics,
+    upsert_experiment(
+        {
+            "experiment_id": experiment_id,
+            "data_source_id": data_source_id,
+            "model_type": "pending",
+            "hyperparameters_json": {
+                "random_state": random_state,
+                "validation_days": validation_days,
+                "target_transform": target_transform,
+                "prediction_floor": prediction_floor,
+                "prediction_cap_quantile": prediction_cap_quantile,
+                "early_stopping_rounds": early_stopping_rounds,
+                "catboost_param_grid": catboost_grid,
+            },
+            "metrics_json": {},
+            "status": "RUNNING",
+            "created_at": experiment_started_at,
+            "updated_at": experiment_started_at,
         }
-        catboost_candidates.append(candidate)
-
-        if best_catboost_metrics is None or metrics["rmse"] < best_catboost_metrics["rmse"]:
-            best_catboost_model = model
-            best_catboost_metrics = metrics
-            best_catboost_params = params
-
-    if best_catboost_model is None or best_catboost_metrics is None:
-        raise RuntimeError("Failed to train CatBoost candidates")
-
-    candidates = {
-        "ridge": (ridge, ridge_metrics),
-        "catboost": (best_catboost_model, best_catboost_metrics),
-    }
-    best_model_name = min(candidates.keys(), key=lambda name: candidates[name][1]["rmse"])
-    best_model, best_metrics = candidates[best_model_name]
-
-    best_pred = best_model.predict(x_val)
-    best_pred = inverse_target_transform(best_pred, target_transform)
-    best_pred = postprocess_predictions(best_pred, prediction_floor, prediction_cap)
-    residual_std = float(np.std(y_val_raw - best_pred))
-
-    model_path = resolve_path(cfg_path.parent, cfg["training"].get("model_path", "artifacts/model.joblib"))
-    metadata_path = resolve_path(cfg_path.parent, cfg["training"].get("metadata_path", "artifacts/model_metadata.json"))
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    metadata_path.parent.mkdir(parents=True, exist_ok=True)
-
-    artifact = {
-        "model": best_model,
-        "model_name": best_model_name,
-        "feature_columns": model_feature_columns,
-        "categorical_columns": categorical_cols,
-        "raw_feature_columns": feature_cols,
-        "trained_at": datetime.utcnow().isoformat() + "Z",
-        "target_transform": target_transform,
-        "prediction_floor": prediction_floor,
-        "prediction_cap": prediction_cap,
-        "prediction_interval_sigma": residual_std,
-    }
-    joblib.dump(artifact, model_path)
-
-    if best_model_name == "catboost":
-        importances = best_model.get_feature_importance()
-        feature_importance = sorted(
-            (
-                {"feature": feature, "importance": float(score)}
-                for feature, score in zip(model_feature_columns, importances, strict=False)
-            ),
-            key=lambda x: x["importance"],
-            reverse=True,
-        )[:20]
-    else:
-        coefs = np.abs(np.asarray(best_model.coef_))
-        feature_importance = sorted(
-            (
-                {"feature": feature, "importance": float(score)}
-                for feature, score in zip(model_feature_columns, coefs, strict=False)
-            ),
-            key=lambda x: x["importance"],
-            reverse=True,
-        )[:20]
-
-    metadata = {
-        "selected_model": best_model_name,
-        "metrics": {
-            "ridge": ridge_metrics,
-            "catboost": best_catboost_metrics,
-            "best": best_metrics,
-        },
-        "catboost_candidates": catboost_candidates,
-        "catboost_selected_params": best_catboost_params,
-        "target_transform": target_transform,
-        "prediction_floor": prediction_floor,
-        "prediction_cap": prediction_cap,
-        "prediction_interval_sigma": residual_std,
-        "top_feature_importance": feature_importance,
-        "train_period": {
-            "date_from": train_df["full_date"].min().date().isoformat(),
-            "date_to": train_df["full_date"].max().date().isoformat(),
-        },
-        "validation_period": {
-            "date_from": val_df["full_date"].min().date().isoformat(),
-            "date_to": val_df["full_date"].max().date().isoformat(),
-        },
-        "feature_columns": model_feature_columns,
-        "raw_feature_columns": feature_cols,
-        "rows": {
-            "train": int(len(train_df)),
-            "validation": int(len(val_df)),
-        },
-    }
-
-    with open(metadata_path, "w", encoding="utf-8") as file:
-        json.dump(metadata, file, ensure_ascii=False, indent=2)
-
-    print("[ML] Training completed")
-    print(f"[ML] Best model: {best_model_name}")
-    print(
-        f"[ML] Metrics: MAE={best_metrics['mae']:.2f}, RMSE={best_metrics['rmse']:.2f}, "
-        f"MAPE={best_metrics['mape']:.2f}%, WAPE={best_metrics['wape']:.2f}%"
     )
-    print(f"[ML] Prediction cap (quantile): {prediction_cap:.2f}")
-    print(f"[ML] Interval sigma: {residual_std:.2f}")
-    print(f"[ML] Model saved to: {model_path}")
-    print(f"[ML] Metadata saved to: {metadata_path}")
+
+    train_period_start: str | None = None
+    train_period_end: str | None = None
+    validation_period_start: str | None = None
+    validation_period_end: str | None = None
+
+    try:
+        engine = sa.create_engine(db_url)
+        raw_df = load_training_data(engine)
+        smoke_mode = is_smoke_mode_enabled()
+        if smoke_mode:
+            smoke_max_rows = max(5000, int(os.getenv("ML_SMOKE_MAX_ROWS", "150000")))
+            raw_df = raw_df.sort_values("full_date").tail(smoke_max_rows).reset_index(drop=True)
+            print(f"[ML][Smoke] Enabled with max_rows={smoke_max_rows}")
+
+        framed = build_training_frame(raw_df)
+        if framed.empty:
+            raise ValueError("Training frame is empty after feature engineering")
+
+        if smoke_mode:
+            requested_validation_days = int(os.getenv("ML_SMOKE_VALIDATION_DAYS", "30"))
+            date_span_days = int((framed["full_date"].max() - framed["full_date"].min()).days)
+            max_safe_validation_days = max(1, date_span_days // 3)
+            validation_days = max(1, min(validation_days, requested_validation_days, max_safe_validation_days))
+            early_stopping_rounds = min(early_stopping_rounds, int(os.getenv("ML_SMOKE_EARLY_STOPPING", "20")))
+            catboost_grid = [
+                {
+                    "depth": int(os.getenv("ML_SMOKE_CATBOOST_DEPTH", "6")),
+                    "learning_rate": float(os.getenv("ML_SMOKE_CATBOOST_LR", "0.08")),
+                    "l2_leaf_reg": float(os.getenv("ML_SMOKE_CATBOOST_L2", "3.0")),
+                    "iterations": int(os.getenv("ML_SMOKE_CATBOOST_ITERS", "120")),
+                }
+            ]
+            print(f"[ML][Smoke] validation_days={validation_days}")
+
+        train_df, val_df = time_split(framed, validation_days=validation_days)
+        if (train_df.empty or val_df.empty) and smoke_mode:
+            unique_dates = np.sort(framed["full_date"].dropna().unique())
+            if len(unique_dates) >= 2:
+                split_idx = max(1, int(len(unique_dates) * 0.8))
+                split_idx = min(split_idx, len(unique_dates) - 1)
+                cutoff = pd.Timestamp(unique_dates[split_idx - 1])
+                train_df = framed[framed["full_date"] <= cutoff].copy()
+                val_df = framed[framed["full_date"] > cutoff].copy()
+        if train_df.empty or val_df.empty:
+            raise ValueError("Insufficient data for time-based split")
+
+        train_period_start = train_df["full_date"].min().date().isoformat()
+        train_period_end = train_df["full_date"].max().date().isoformat()
+        validation_period_start = val_df["full_date"].min().date().isoformat()
+        validation_period_end = val_df["full_date"].max().date().isoformat()
+
+        feature_cols = [
+            "store_id",
+            "promo",
+            "school_holiday",
+            "open",
+            "competition_distance",
+            "promo2",
+            "day_of_week",
+            "month",
+            "quarter",
+            "week_of_year",
+            "is_weekend",
+            "days_since_start",
+            "lag_1",
+            "lag_7",
+            "lag_14",
+            "lag_28",
+            "rolling_mean_7",
+            "rolling_mean_14",
+            "rolling_mean_28",
+            "rolling_std_7",
+            "rolling_std_14",
+            "rolling_std_28",
+            "lag_1_to_mean_7_ratio",
+            "state_holiday",
+            "store_type",
+            "assortment",
+        ]
+
+        categorical_cols = ["state_holiday", "store_type", "assortment"]
+
+        x_train_raw = train_df[feature_cols].copy()
+        y_train_raw = train_df["sales"].astype(float)
+        y_train_model = np.log1p(y_train_raw) if target_transform == "log1p" else y_train_raw
+
+        x_val_raw = val_df[feature_cols].copy()
+        y_val_raw = val_df["sales"].astype(float)
+        y_val_model = np.log1p(y_val_raw) if target_transform == "log1p" else y_val_raw
+
+        prediction_cap = float(np.quantile(train_df["sales"].astype(float), prediction_cap_quantile))
+
+        x_train, model_feature_columns = encode_features(x_train_raw, categorical_cols)
+        x_val, _ = encode_features(x_val_raw, categorical_cols, feature_columns=model_feature_columns)
+
+        ridge = Ridge(random_state=random_state)
+        ridge.fit(x_train, y_train_model)
+        ridge_pred = ridge.predict(x_val)
+        ridge_pred = inverse_target_transform(ridge_pred, target_transform)
+        ridge_pred = postprocess_predictions(ridge_pred, prediction_floor, prediction_cap)
+        ridge_metrics = evaluate_model(y_val_raw, ridge_pred)
+
+        catboost_candidates: list[dict] = []
+        best_catboost_model: CatBoostRegressor | None = None
+        best_catboost_metrics: dict | None = None
+        best_catboost_params: dict | None = None
+
+        for params in catboost_grid:
+            model = CatBoostRegressor(
+                loss_function="RMSE",
+                random_seed=random_state,
+                verbose=False,
+                **params,
+            )
+
+            model.fit(
+                x_train,
+                y_train_model,
+                eval_set=(x_val, y_val_model),
+                use_best_model=True,
+                early_stopping_rounds=early_stopping_rounds,
+            )
+
+            pred = model.predict(x_val)
+            pred = inverse_target_transform(pred, target_transform)
+            pred = postprocess_predictions(pred, prediction_floor, prediction_cap)
+            metrics = evaluate_model(y_val_raw, pred)
+
+            candidate = {
+                "params": params,
+                "metrics": metrics,
+            }
+            catboost_candidates.append(candidate)
+
+            if best_catboost_metrics is None or metrics["rmse"] < best_catboost_metrics["rmse"]:
+                best_catboost_model = model
+                best_catboost_metrics = metrics
+                best_catboost_params = params
+
+        if best_catboost_model is None or best_catboost_metrics is None:
+            raise RuntimeError("Failed to train CatBoost candidates")
+
+        candidates = {
+            "ridge": (ridge, ridge_metrics),
+            "catboost": (best_catboost_model, best_catboost_metrics),
+        }
+        best_model_name = min(candidates.keys(), key=lambda name: candidates[name][1]["rmse"])
+        best_model, best_metrics = candidates[best_model_name]
+
+        best_pred = best_model.predict(x_val)
+        best_pred = inverse_target_transform(best_pred, target_transform)
+        best_pred = postprocess_predictions(best_pred, prediction_floor, prediction_cap)
+        residual_std = float(np.std(y_val_raw - best_pred))
+
+        model_path = resolve_path(cfg_path.parent, cfg["training"].get("model_path", "artifacts/model.joblib"))
+        metadata_path = resolve_path(cfg_path.parent, cfg["training"].get("metadata_path", "artifacts/model_metadata.json"))
+        model_path.parent.mkdir(parents=True, exist_ok=True)
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)
+
+        artifact = {
+            "model": best_model,
+            "model_name": best_model_name,
+            "feature_columns": model_feature_columns,
+            "categorical_columns": categorical_cols,
+            "raw_feature_columns": feature_cols,
+            "trained_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "target_transform": target_transform,
+            "prediction_floor": prediction_floor,
+            "prediction_cap": prediction_cap,
+            "prediction_interval_sigma": residual_std,
+        }
+        joblib.dump(artifact, model_path)
+
+        if best_model_name == "catboost":
+            importances = best_model.get_feature_importance()
+            feature_importance = sorted(
+                (
+                    {"feature": feature, "importance": float(score)}
+                    for feature, score in zip(model_feature_columns, importances, strict=False)
+                ),
+                key=lambda x: x["importance"],
+                reverse=True,
+            )[:20]
+        else:
+            coefs = np.abs(np.asarray(best_model.coef_))
+            feature_importance = sorted(
+                (
+                    {"feature": feature, "importance": float(score)}
+                    for feature, score in zip(model_feature_columns, coefs, strict=False)
+                ),
+                key=lambda x: x["importance"],
+                reverse=True,
+            )[:20]
+
+        metadata = {
+            "selected_model": best_model_name,
+            "metrics": {
+                "ridge": ridge_metrics,
+                "catboost": best_catboost_metrics,
+                "best": best_metrics,
+            },
+            "catboost_candidates": catboost_candidates,
+            "catboost_selected_params": best_catboost_params,
+            "target_transform": target_transform,
+            "prediction_floor": prediction_floor,
+            "prediction_cap": prediction_cap,
+            "prediction_interval_sigma": residual_std,
+            "top_feature_importance": feature_importance,
+            "train_period": {
+                "date_from": train_period_start,
+                "date_to": train_period_end,
+            },
+            "validation_period": {
+                "date_from": validation_period_start,
+                "date_to": validation_period_end,
+            },
+            "feature_columns": model_feature_columns,
+            "raw_feature_columns": feature_cols,
+            "rows": {
+                "train": int(len(train_df)),
+                "validation": int(len(val_df)),
+            },
+        }
+
+        with open(metadata_path, "w", encoding="utf-8") as file:
+            json.dump(metadata, file, ensure_ascii=False, indent=2)
+
+        upsert_experiment(
+            {
+                "experiment_id": experiment_id,
+                "data_source_id": data_source_id,
+                "model_type": best_model_name,
+                "hyperparameters_json": {
+                    "random_state": random_state,
+                    "validation_days": validation_days,
+                    "target_transform": target_transform,
+                    "prediction_floor": prediction_floor,
+                    "prediction_cap_quantile": prediction_cap_quantile,
+                    "prediction_cap_value": prediction_cap,
+                    "early_stopping_rounds": early_stopping_rounds,
+                    "catboost_selected_params": best_catboost_params or {},
+                },
+                "train_period_start": train_period_start,
+                "train_period_end": train_period_end,
+                "validation_period_start": validation_period_start,
+                "validation_period_end": validation_period_end,
+                "metrics_json": {
+                    "best": best_metrics,
+                    "ridge": ridge_metrics,
+                    "catboost": best_catboost_metrics,
+                },
+                "status": "COMPLETED",
+                "artifact_path": str(model_path),
+                "metadata_path": str(metadata_path),
+                "created_at": experiment_started_at,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+
+        print("[ML] Training completed")
+        print(f"[ML] Best model: {best_model_name}")
+        print(
+            f"[ML] Metrics: MAE={best_metrics['mae']:.2f}, RMSE={best_metrics['rmse']:.2f}, "
+            f"MAPE={best_metrics['mape']:.2f}%, WAPE={best_metrics['wape']:.2f}%"
+        )
+        print(f"[ML] Prediction cap (quantile): {prediction_cap:.2f}")
+        print(f"[ML] Interval sigma: {residual_std:.2f}")
+        print(f"[ML] Model saved to: {model_path}")
+        print(f"[ML] Metadata saved to: {metadata_path}")
+    except Exception as exc:
+        upsert_experiment(
+            {
+                "experiment_id": experiment_id,
+                "data_source_id": data_source_id,
+                "model_type": "failed",
+                "hyperparameters_json": {
+                    "random_state": random_state,
+                    "validation_days": validation_days,
+                    "target_transform": target_transform,
+                    "prediction_floor": prediction_floor,
+                    "prediction_cap_quantile": prediction_cap_quantile,
+                    "early_stopping_rounds": early_stopping_rounds,
+                },
+                "train_period_start": train_period_start,
+                "train_period_end": train_period_end,
+                "validation_period_start": validation_period_start,
+                "validation_period_end": validation_period_end,
+                "metrics_json": {"error": str(exc)},
+                "status": "FAILED",
+                "created_at": experiment_started_at,
+                "updated_at": datetime.now(timezone.utc),
+            }
+        )
+        raise
 
 
 if __name__ == "__main__":
