@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import yaml
 
@@ -1525,3 +1526,84 @@ def get_notification_attempt_details(attempt_id: str) -> dict[str, Any] | None:
     if not normalized_attempt_id:
         raise ValueError("attempt_id is required")
     return get_delivery_attempt(normalized_attempt_id)
+
+
+def get_notification_endpoints(
+    *,
+    channels_path: str | Path | None = None,
+) -> dict[str, Any]:
+    payload = load_notification_channels(channels_path)
+    items: list[dict[str, Any]] = []
+    for channel in payload["channels"]:
+        parsed_target = urlparse(channel.target_url) if channel.target_url else None
+        target_hint = None
+        if parsed_target and parsed_target.scheme and parsed_target.netloc:
+            target_hint = f"{parsed_target.scheme}://{parsed_target.netloc}"
+
+        items.append(
+            {
+                "id": channel.id,
+                "channel_type": channel.channel_type,
+                "enabled": bool(channel.enabled),
+                "target_hint": target_hint,
+                "has_target_url": bool(channel.target_url),
+                "timeout_seconds": int(channel.timeout_seconds),
+                "max_attempts": int(channel.max_attempts),
+                "backoff_seconds": int(channel.backoff_seconds),
+                "enabled_event_types": list(channel.enabled_event_types),
+            }
+        )
+
+    return {
+        "version": payload.get("version", "v1"),
+        "path": payload.get("path"),
+        "items": items,
+    }
+
+
+def get_notification_deliveries(
+    *,
+    page: int = 1,
+    page_size: int = 25,
+    status: str | None = None,
+) -> dict[str, Any]:
+    normalized_page = max(1, int(page))
+    normalized_page_size = max(1, min(int(page_size), 200))
+
+    status_to_attempt = {
+        "PENDING": "STARTED",
+        "RETRYING": "RETRY",
+        "SENT": "SENT",
+        "DEAD": "DEAD",
+        "FAILED": "FAILED",
+        "STARTED": "STARTED",
+        "RETRY": "RETRY",
+    }
+    normalized_status_value = None
+    normalized_attempt_status = None
+    if status is not None and str(status).strip():
+        normalized_status_value = str(status).strip().upper()
+        normalized_attempt_status = status_to_attempt.get(normalized_status_value)
+        if normalized_attempt_status is None:
+            raise ValueError(
+                "Unsupported deliveries status. Expected one of: "
+                "PENDING, RETRYING, SENT, DEAD, FAILED, STARTED, RETRY."
+            )
+
+    rows = query_delivery_attempts(
+        attempt_statuses=(normalized_attempt_status,) if normalized_attempt_status else None,
+        limit=None,
+        descending=True,
+    )
+    total = len(rows)
+    start = (normalized_page - 1) * normalized_page_size
+    end = start + normalized_page_size
+    page_rows = rows[start:end]
+
+    return {
+        "page": normalized_page,
+        "page_size": normalized_page_size,
+        "total": total,
+        "status": normalized_status_value,
+        "items": page_rows,
+    }

@@ -212,6 +212,7 @@ def _record_counts(records: list[dict[str, Any]]) -> dict[str, Any]:
 def _query_filtered_records(
     *,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     mode: str | None = None,
     final_status: str | None = None,
     date_from: str | None = None,
@@ -225,6 +226,7 @@ def _query_filtered_records(
 
     records = query_preflight_runs(
         source_name=normalized_source,
+        data_source_id=data_source_id,
         mode=normalized_mode,
         final_status=normalized_final_status,
         date_from=resolved_from,
@@ -234,6 +236,7 @@ def _query_filtered_records(
 
     filters = {
         "source_name": normalized_source,
+        "data_source_id": data_source_id,
         "mode": normalized_mode,
         "final_status": normalized_final_status,
         "date_from": _isoformat_utc(resolved_from) if resolved_from is not None else None,
@@ -259,6 +262,9 @@ def _compact_record(payload: dict[str, Any]) -> dict[str, Any]:
         "artifact_dir": payload.get("artifact_dir"),
         "validation_report_path": payload.get("validation_report_path"),
         "manifest_path": payload.get("manifest_path"),
+        "data_source_id": payload.get("data_source_id"),
+        "contract_id": payload.get("contract_id"),
+        "contract_version": payload.get("contract_version"),
     }
 
 
@@ -609,8 +615,12 @@ def _load_semantic_payload_with_fallback(record: dict[str, Any]) -> tuple[dict[s
     )
 
 
-def list_preflight_run_summaries(limit: int = 20, source_name: str | None = None) -> list[dict[str, Any]]:
-    records = list_preflight_runs(limit=limit, source_name=source_name)
+def list_preflight_run_summaries(
+    limit: int = 20,
+    source_name: str | None = None,
+    data_source_id: int | None = None,
+) -> list[dict[str, Any]]:
+    records = list_preflight_runs(limit=limit, source_name=source_name, data_source_id=data_source_id)
     return [_compact_record(record) for record in records]
 
 
@@ -630,8 +640,8 @@ def get_preflight_run_details(run_id: str) -> dict[str, Any] | None:
     }
 
 
-def get_latest_preflight_run() -> dict[str, Any] | None:
-    payload = get_latest_preflight(source_name=None)
+def get_latest_preflight_run(data_source_id: int | None = None) -> dict[str, Any] | None:
+    payload = get_latest_preflight(source_name=None, data_source_id=data_source_id)
     if payload is None:
         return None
     run_id = payload.get("run_id")
@@ -640,8 +650,11 @@ def get_latest_preflight_run() -> dict[str, Any] | None:
     return get_preflight_run_details(str(run_id))
 
 
-def get_latest_preflight_for_source(source_name: str) -> dict[str, Any] | None:
-    payload = get_latest_preflight(source_name=source_name)
+def get_latest_preflight_for_source(
+    source_name: str,
+    data_source_id: int | None = None,
+) -> dict[str, Any] | None:
+    payload = get_latest_preflight(source_name=source_name, data_source_id=data_source_id)
     if payload is None:
         return None
     return _compact_record(payload)
@@ -748,6 +761,7 @@ def get_preflight_source_artifact_download(
 def get_preflight_stats(
     *,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     mode: str | None = None,
     final_status: str | None = None,
     date_from: str | None = None,
@@ -756,6 +770,7 @@ def get_preflight_stats(
 ) -> dict[str, Any]:
     records, filters = _query_filtered_records(
         source_name=source_name,
+        data_source_id=data_source_id,
         mode=mode,
         final_status=final_status,
         date_from=date_from,
@@ -782,6 +797,7 @@ def get_preflight_stats(
 def get_preflight_trends(
     *,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     mode: str | None = None,
     final_status: str | None = None,
     date_from: str | None = None,
@@ -795,6 +811,7 @@ def get_preflight_trends(
 
     records, filters = _query_filtered_records(
         source_name=source_name,
+        data_source_id=data_source_id,
         mode=mode,
         final_status=final_status,
         date_from=date_from,
@@ -848,6 +865,7 @@ def get_preflight_trends(
 def get_preflight_top_rules(
     *,
     source_name: str | None = None,
+    data_source_id: int | None = None,
     mode: str | None = None,
     final_status: str | None = None,
     date_from: str | None = None,
@@ -858,6 +876,7 @@ def get_preflight_top_rules(
     normalized_limit = max(1, min(int(limit), 100))
     records, filters = _query_filtered_records(
         source_name=source_name,
+        data_source_id=data_source_id,
         mode=mode,
         final_status=final_status,
         date_from=date_from,

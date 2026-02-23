@@ -15,6 +15,8 @@ from app.security.diagnostics_auth import (
 )
 from app.services.metrics_export_service import render_prometheus_metrics
 from app.schemas import (
+    NotificationDeliveryPageResponse,
+    NotificationEndpointsResponse,
     PreflightAcknowledgeAlertRequest,
     PreflightActiveAlertsResponse,
     PreflightAlertAcknowledgementResponse,
@@ -78,6 +80,8 @@ from app.services.preflight_notifications_service import (
     get_notification_attempt_details,
     get_notification_attempts,
     get_notification_channels,
+    get_notification_deliveries,
+    get_notification_endpoints,
     get_notification_history,
     get_notification_outbox,
     get_notification_stats,
@@ -129,10 +133,11 @@ async def diagnostics_metrics(
 def diagnostics_preflight_runs(
     limit: int = Query(20, ge=1, le=100),
     source_name: Literal["train", "store"] | None = Query(default=None),
+    data_source_id: int | None = Query(default=None, gt=0),
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunsListResponse:
     try:
-        items = list_preflight_run_summaries(limit=limit, source_name=source_name)
+        items = list_preflight_run_summaries(limit=limit, source_name=source_name, data_source_id=data_source_id)
         return PreflightRunsListResponse(items=items, limit=limit, source_name=source_name)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
@@ -155,10 +160,11 @@ def diagnostics_preflight_run_details(
 
 @router.get("/diagnostics/preflight/latest", response_model=PreflightRunDetailResponse)
 def diagnostics_preflight_latest(
+    data_source_id: int | None = Query(default=None, gt=0),
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunDetailResponse:
     try:
-        payload = get_latest_preflight_run()
+        payload = get_latest_preflight_run(data_source_id=data_source_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
 
@@ -170,10 +176,11 @@ def diagnostics_preflight_latest(
 @router.get("/diagnostics/preflight/latest/{source_name}", response_model=PreflightRunSummary)
 def diagnostics_preflight_latest_by_source(
     source_name: Literal["train", "store"],
+    data_source_id: int | None = Query(default=None, gt=0),
     _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
 ) -> PreflightRunSummary:
     try:
-        payload = get_latest_preflight_for_source(source_name)
+        payload = get_latest_preflight_for_source(source_name, data_source_id=data_source_id)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
 
@@ -185,6 +192,7 @@ def diagnostics_preflight_latest_by_source(
 @router.get("/diagnostics/preflight/stats", response_model=PreflightStatsResponse)
 def diagnostics_preflight_stats(
     source_name: Literal["train", "store"] | None = Query(default=None),
+    data_source_id: int | None = Query(default=None, gt=0),
     mode: Literal["off", "report_only", "enforce"] | None = Query(default=None),
     final_status: Literal["PASS", "WARN", "FAIL"] | None = Query(default=None),
     date_from: str | None = Query(default=None),
@@ -195,6 +203,7 @@ def diagnostics_preflight_stats(
     try:
         payload = get_preflight_stats(
             source_name=source_name,
+            data_source_id=data_source_id,
             mode=mode,
             final_status=final_status,
             date_from=date_from,
@@ -211,6 +220,7 @@ def diagnostics_preflight_stats(
 @router.get("/diagnostics/preflight/trends", response_model=PreflightTrendsResponse)
 def diagnostics_preflight_trends(
     source_name: Literal["train", "store"] | None = Query(default=None),
+    data_source_id: int | None = Query(default=None, gt=0),
     mode: Literal["off", "report_only", "enforce"] | None = Query(default=None),
     final_status: Literal["PASS", "WARN", "FAIL"] | None = Query(default=None),
     date_from: str | None = Query(default=None),
@@ -222,6 +232,7 @@ def diagnostics_preflight_trends(
     try:
         payload = get_preflight_trends(
             source_name=source_name,
+            data_source_id=data_source_id,
             mode=mode,
             final_status=final_status,
             date_from=date_from,
@@ -239,6 +250,7 @@ def diagnostics_preflight_trends(
 @router.get("/diagnostics/preflight/rules/top", response_model=PreflightTopRulesResponse)
 def diagnostics_preflight_rules_top(
     source_name: Literal["train", "store"] | None = Query(default=None),
+    data_source_id: int | None = Query(default=None, gt=0),
     mode: Literal["off", "report_only", "enforce"] | None = Query(default=None),
     final_status: Literal["PASS", "WARN", "FAIL"] | None = Query(default=None),
     date_from: str | None = Query(default=None),
@@ -250,6 +262,7 @@ def diagnostics_preflight_rules_top(
     try:
         payload = get_preflight_top_rules(
             source_name=source_name,
+            data_source_id=data_source_id,
             mode=mode,
             final_status=final_status,
             date_from=date_from,
@@ -532,6 +545,41 @@ def diagnostics_preflight_notifications_channels(
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
     return PreflightNotificationChannelsResponse.model_validate(payload)
+
+
+@router.get(
+    "/diagnostics/preflight/notifications/endpoints",
+    response_model=NotificationEndpointsResponse,
+)
+def diagnostics_preflight_notifications_endpoints(
+    _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
+) -> NotificationEndpointsResponse:
+    try:
+        payload = get_notification_endpoints()
+    except (DiagnosticsPayloadError, ValueError, FileNotFoundError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
+    return NotificationEndpointsResponse.model_validate(payload)
+
+
+@router.get(
+    "/diagnostics/preflight/notifications/deliveries",
+    response_model=NotificationDeliveryPageResponse,
+)
+def diagnostics_preflight_notifications_deliveries(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=200),
+    status: str | None = Query(default=None),
+    _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
+) -> NotificationDeliveryPageResponse:
+    try:
+        payload = get_notification_deliveries(page=page, page_size=page_size, status=status)
+    except (DiagnosticsPayloadError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
+    return NotificationDeliveryPageResponse.model_validate(payload)
 
 
 @router.get("/diagnostics/preflight/notifications/attempts", response_model=PreflightNotificationAttemptsResponse)
