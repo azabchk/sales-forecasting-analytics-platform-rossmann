@@ -37,8 +37,8 @@ class ETLConfig:
     preflight_profile_store: str
     preflight_contract_path: str
     preflight_artifact_dir: str
-    preflight_contract_id: str
-    data_source_id: int | None
+    preflight_contract_id: str = "rossmann_input_contract"
+    data_source_id: int | None = None
 
 
 def _resolve_path(value: str, base_dir: Path) -> str:
