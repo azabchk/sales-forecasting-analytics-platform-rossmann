@@ -43,6 +43,9 @@ jobs:
           SMOKE_FRONTEND_BUILD: "0"
           SMOKE_BACKEND_MODE: "local"
           KEEP_RUNNING: "0"
+          PIP_RETRIES: "10"
+          PIP_TIMEOUT: "60"
+          PIP_DISABLE_PIP_VERSION_CHECK: "1"
         run: bash scripts/smoke.sh
 
       - name: Capture compose diagnostics on failure

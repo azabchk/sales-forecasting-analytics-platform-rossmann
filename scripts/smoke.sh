@@ -187,14 +187,16 @@ resolve_preflight_mode() {
 ensure_venv() {
   local venv_path="$1"
   local requirements_file="$2"
+  local pip_retries="${PIP_RETRIES:-10}"
+  local pip_timeout="${PIP_TIMEOUT:-60}"
 
   if [[ ! -x "$venv_path/bin/python" ]]; then
     echo "[SMOKE] Creating venv: $venv_path"
     "$PYTHON_BIN" -m venv "$venv_path"
   fi
 
-  "$venv_path/bin/python" -m pip install --upgrade pip >/dev/null
-  "$venv_path/bin/pip" install -r "$requirements_file" >/dev/null
+  "$venv_path/bin/python" -m pip install --upgrade pip --retries "$pip_retries" --timeout "$pip_timeout" >/dev/null
+  "$venv_path/bin/python" -m pip install --retries "$pip_retries" --timeout "$pip_timeout" -r "$requirements_file" >/dev/null
 }
 
 assert_json_array_endpoint() {
