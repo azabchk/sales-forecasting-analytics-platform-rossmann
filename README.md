@@ -152,6 +152,30 @@ Key variables:
 - `SCENARIO_PRICE_ELASTICITY` (scenario v2 demand approximation factor)
 - `SCENARIO_MAX_SEGMENT_STORES` (upper bound for segment-mode scenario fan-out)
 
+## Run Locally
+
+One-command local startup (DB + backend + frontend):
+
+```bash
+bash scripts/dev_up.sh
+```
+
+Demo mode (init DB + ETL + quick ML train before startup):
+
+```bash
+DEMO=1 bash scripts/dev_up.sh
+```
+
+Stop everything:
+
+```bash
+bash scripts/dev_down.sh
+```
+
+See full local setup and troubleshooting:
+
+- `docs/LOCAL-DEV.md`
+
 ## Windows 11 (Recommended Local Flow)
 
 ### One-click run

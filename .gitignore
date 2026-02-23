@@ -30,6 +30,7 @@ frontend/dist/
 dist/
 build/
 *.log
+.run/
 
 # IDE
 .vscode/
