@@ -32,7 +32,7 @@ def _configure_env(monkeypatch, tmp_path: Path, *, db_name: str) -> str:
 
 
 def _seed_metrics_data(database_url: str) -> None:
-    now = datetime(2026, 2, 22, 12, 0, tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
 
     insert_preflight_run(
         {

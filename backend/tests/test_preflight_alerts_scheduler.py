@@ -18,6 +18,7 @@ def test_scheduler_handles_missing_apscheduler(monkeypatch):
     monkeypatch.setenv("PREFLIGHT_ALERTS_SCHEDULER_ENABLED", "1")
     monkeypatch.setenv("PREFLIGHT_ALERTS_SCHEDULER_AUTO_START", "1")
     monkeypatch.setenv("PREFLIGHT_ALERTS_SCHEDULER_INTERVAL_SECONDS", "10")
+    monkeypatch.setattr("app.services.preflight_alerts_scheduler.AsyncIOScheduler", None)
 
     scheduler = PreflightAlertsScheduler.from_env()
     started = scheduler.start()
