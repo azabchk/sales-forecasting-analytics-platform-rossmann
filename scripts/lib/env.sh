@@ -131,12 +131,26 @@ PY
 
 load_canonical_env() {
   local root_dir="${1:-$(resolve_repo_root)}"
+  local forced_env_file="${2:-}"
 
   local env_file
-  env_file="$(choose_env_file "$root_dir")" || {
+  if [[ -n "$forced_env_file" ]]; then
+    if [[ ! -f "$forced_env_file" ]]; then
+      echo "[ENV] ERROR: specified env file not found: $forced_env_file" >&2
+      return 1
+    fi
+    env_file="$forced_env_file"
+  else
+    env_file="$(choose_env_file "$root_dir")" || {
+      echo "[ENV] ERROR: neither .env nor .env.example exists under $root_dir" >&2
+      return 1
+    }
+  fi
+
+  if [[ -z "$env_file" ]]; then
     echo "[ENV] ERROR: neither .env nor .env.example exists under $root_dir" >&2
     return 1
-  }
+  fi
 
   load_key_value_env_file "$env_file"
 
