@@ -1,0 +1,44 @@
+services:
+  backend:
+    restart: unless-stopped
+    depends_on: {}
+    volumes: []
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      ENVIRONMENT: production
+      BACKEND_HOST: 0.0.0.0
+      BACKEND_PORT: 8000
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://app.yourcompany.com,https://stg-app.yourcompany.com}
+      PYTHONUNBUFFERED: "1"
+    command: >
+      gunicorn app.main:app
+      -k uvicorn.workers.UvicornWorker
+      --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-3}
+      --timeout ${GUNICORN_TIMEOUT:-120}
+    ports: []
+    expose:
+      - "8000"
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile.prod
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-https://api.yourcompany.com/api/v1}
+    container_name: vkr_frontend
+    restart: unless-stopped
+    expose:
+      - "80"
+
+  reverse_proxy:
+    image: nginx:1.27-alpine
+    container_name: vkr_reverse_proxy
+    restart: unless-stopped
+    depends_on:
+      - backend
+      - frontend
+    ports:
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./infra/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
