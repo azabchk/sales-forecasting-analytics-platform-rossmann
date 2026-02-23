@@ -169,6 +169,16 @@
   padding: 12px 24px 18px;
 }
 
+.ecosystem-main .footer-meta {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.ecosystem-main .footer-meta code {
+  color: var(--text);
+}
+
 @media (max-width: 1220px) {
   .ecosystem-shell {
     grid-template-columns: 236px minmax(0, 1fr);

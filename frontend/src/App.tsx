@@ -1,7 +1,7 @@
 import React from "react";
 import { Route, Routes } from "react-router-dom";
 
-import { extractApiError } from "./api/client";
+import { API_BASE_SOURCE, API_BASE_URL, extractApiError } from "./api/client";
 import { fetchHealth } from "./api/endpoints";
 import Sidebar from "./components/layout/Sidebar";
 import TopBar from "./components/layout/TopBar";
@@ -167,6 +167,11 @@ export default function App() {
         <footer className="footer">
           <p>{t("shell_title", "Aqiq Analytics Platform")}</p>
           <p>{t("footer_credit", "Created by Azab and Adam.")}</p>
+          {import.meta.env.DEV ? (
+            <p className="footer-meta">
+              API: <code>{API_BASE_URL}</code> ({API_BASE_SOURCE})
+            </p>
+          ) : null}
         </footer>
       </div>
     </div>

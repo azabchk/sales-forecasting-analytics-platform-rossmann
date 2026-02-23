@@ -1,6 +1,27 @@
 import axios from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000/api/v1";
+function normalizeBaseUrl(raw: string): string {
+  return raw.replace(/\/+$/, "");
+}
+
+function resolveApiBaseUrl(): { baseUrl: string; source: string } {
+  const configured = String(import.meta.env.VITE_API_BASE_URL ?? "").trim();
+  if (configured.length > 0) {
+    return { baseUrl: normalizeBaseUrl(configured), source: "VITE_API_BASE_URL" };
+  }
+
+  const backendPort = String(import.meta.env.VITE_BACKEND_PORT ?? "8000").trim() || "8000";
+  const host = typeof window !== "undefined" ? window.location.hostname || "localhost" : "localhost";
+  const protocol = typeof window !== "undefined" ? window.location.protocol : "http:";
+  return {
+    baseUrl: normalizeBaseUrl(`${protocol}//${host}:${backendPort}/api/v1`),
+    source: "fallback(VITE_BACKEND_PORT)",
+  };
+}
+
+const resolved = resolveApiBaseUrl();
+export const API_BASE_URL = resolved.baseUrl;
+export const API_BASE_SOURCE = resolved.source;
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
