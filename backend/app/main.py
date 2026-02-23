@@ -18,6 +18,7 @@ from app.routers import (
     kpi,
     ml,
     sales,
+    scenario,
     stores,
     system,
 )
@@ -101,6 +102,7 @@ app.include_router(stores.router, prefix="/api/v1", tags=["stores"])
 app.include_router(kpi.router, prefix="/api/v1", tags=["kpi"])
 app.include_router(sales.router, prefix="/api/v1", tags=["sales"])
 app.include_router(forecast.router, prefix="/api/v1", tags=["forecast"])
+app.include_router(scenario.router, prefix="/api/v1", tags=["scenario"])
 app.include_router(system.router, prefix="/api/v1", tags=["system"])
 app.include_router(data_sources.router, prefix="/api/v1", tags=["data_sources"])
 app.include_router(contracts.router, prefix="/api/v1", tags=["contracts"])
