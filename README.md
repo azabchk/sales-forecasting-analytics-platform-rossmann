@@ -7,13 +7,41 @@ End-to-end platform for store-level analytics and demand forecasting:
 - FastAPI backend (`/api/v1`)
 - React dashboard
 
+## What's New In v2
+
+The platform now behaves like a small production ecosystem, not only a demo dashboard:
+
+- Multi-client/data-source model:
+  - new `data_source` domain and APIs (`/api/v1/data-sources*`)
+  - preflight/ETL/forecast/ML runs can be linked to a specific source
+  - backward-compatible default source (`Rossmann Default`) is auto-created
+- Contract management:
+  - versioned file-backed contract registry (`config/input_contract/contracts_registry.yaml`)
+  - APIs for contract list/detail/version history (`/api/v1/contracts*`)
+  - read-only schema summaries (required columns, aliases, dtypes)
+- ML experiment tracking:
+  - training writes lifecycle records (`RUNNING` -> `COMPLETED` / `FAILED`) to `ml_experiment_registry`
+  - APIs (`/api/v1/ml/experiments*`) and UI module for experiment inspection
+- Scenario Lab v2:
+  - new endpoint: `POST /api/v1/scenario/run`
+  - supports store mode and basic segment mode (`store_type`, `assortment`, `promo2`)
+  - returns baseline vs scenario series with KPI deltas and explicit elasticity assumptions
+- Notifications & alerts UI:
+  - dedicated dashboard view for active alerts, endpoints, and delivery history
+  - new diagnostics endpoints:
+    - `GET /api/v1/diagnostics/preflight/notifications/endpoints`
+    - `GET /api/v1/diagnostics/preflight/notifications/deliveries`
+- Frontend redesign:
+  - executive light app shell with persistent left sidebar + top status bar
+  - consistent cards/tables/panels and clearer page-level information hierarchy
+
 ## Version 2.0.0 Highlights
 
 - Professional multi-page dashboard:
   - Executive Overview
   - Store Analytics
   - Forecast Studio
-  - Scenario Lab (new in V3)
+  - Scenario Lab
   - Model Intelligence
 - Forecast + planning UX:
   - horizon presets (`7D`, `30D`, `90D`)
@@ -119,6 +147,10 @@ Key variables:
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `MODEL_PATH`, `MODEL_METADATA_PATH`
 - `VITE_API_BASE_URL`
+- `DATA_SOURCE_ID` (optional default source override for ETL/ML/forecast flows)
+- `CONTRACTS_REGISTRY_PATH` (optional override for contract registry YAML path)
+- `SCENARIO_PRICE_ELASTICITY` (scenario v2 demand approximation factor)
+- `SCENARIO_MAX_SEGMENT_STORES` (upper bound for segment-mode scenario fan-out)
 
 ## Windows 11 (Recommended Local Flow)
 
@@ -226,7 +258,11 @@ Or:
 - System Summary: `http://localhost:8000/api/v1/system/summary`
 - Model Metadata: `http://localhost:8000/api/v1/model/metadata`
 - Scenario Forecast API: `POST http://localhost:8000/api/v1/forecast/scenario`
+- Scenario v2 API: `POST http://localhost:8000/api/v1/scenario/run`
 - Batch Forecast API: `POST http://localhost:8000/api/v1/forecast/batch`
+- Data Sources API: `GET http://localhost:8000/api/v1/data-sources`
+- Contracts API: `GET http://localhost:8000/api/v1/contracts`
+- ML Experiments API: `GET http://localhost:8000/api/v1/ml/experiments`
 - Preflight Runs API: `GET http://localhost:8000/api/v1/diagnostics/preflight/runs`
 - Preflight Latest API: `GET http://localhost:8000/api/v1/diagnostics/preflight/latest`
 
@@ -505,3 +541,30 @@ Production note:
 - keep diagnostics metrics auth enabled in production
 - use internal/protected scrape and routing paths
 - do not commit receiver secrets/tokens to repo configs
+
+## V2 Operational Readiness
+
+A dedicated end-to-end smoke command is now available:
+
+```bash
+bash scripts/smoke.sh
+```
+
+By default it runs PostgreSQL in Docker and starts backend locally from `backend/.venv311` for faster feedback.
+Set `SMOKE_BACKEND_MODE=docker` to run backend in Compose as well.
+
+What it validates in order:
+
+- Compose healthchecks (`postgres`, `backend`)
+- DB init (including `sql/04_v2_ecosystem.sql`)
+- ETL load completion
+- ML training completion + experiment persistence
+- Core v2 API checks (`data-sources`, `contracts`, `ml/experiments`, `scenario/run`)
+
+Additional docs:
+
+- `docs/SMOKE.md`
+
+CI smoke workflow:
+
+- `.github/workflows/smoke.yml`
