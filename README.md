@@ -144,9 +144,11 @@ Create `.env` from `.env.example` in repo root.
 
 Key variables:
 - `DATABASE_URL`
+- `DATABASE_URL_DOCKER` (compose backend URL; defaults to postgres service host)
 - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`
 - `MODEL_PATH`, `MODEL_METADATA_PATH`
 - `VITE_API_BASE_URL`
+- `FRONTEND_PORT` (used for dev CORS expansion)
 - `DATA_SOURCE_ID` (optional default source override for ETL/ML/forecast flows)
 - `CONTRACTS_REGISTRY_PATH` (optional override for contract registry YAML path)
 - `SCENARIO_PRICE_ELASTICITY` (scenario v2 demand approximation factor)
@@ -170,6 +172,12 @@ Stop everything:
 
 ```bash
 bash scripts/dev_down.sh
+```
+
+Run automated diagnostics (logs + DB checks + API checks + auto-remediation for empty DB):
+
+```bash
+bash scripts/doctor.sh
 ```
 
 See full local setup and troubleshooting:

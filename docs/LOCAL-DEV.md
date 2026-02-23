@@ -40,10 +40,10 @@ Stop backend/frontend processes started by `dev_up.sh` and shut down compose:
 bash scripts/dev_down.sh
 ```
 
-Keep Docker volumes:
+Remove Docker volumes explicitly:
 
 ```bash
-KEEP_VOLUMES=1 bash scripts/dev_down.sh
+REMOVE_VOLUMES=1 bash scripts/dev_down.sh
 ```
 
 ## What `dev_up.sh` Does
@@ -64,13 +64,28 @@ KEEP_VOLUMES=1 bash scripts/dev_down.sh
    - `GET /api/v1/contracts`
 8. Prints backend/frontend URLs and log paths.
 
+## Automated Diagnostics
+
+Run a full doctor report (runtime logs, DB table checks, API checks, and auto-remediation for empty DB):
+
+```bash
+bash scripts/doctor.sh
+```
+
+The report is saved under:
+
+- `artifacts/doctor/doctor-*.log`
+
 ## Common Issues
 
 - Port already in use:
-  - Change `PORT_BACKEND` and/or `PORT_FRONTEND`.
+  - `dev_up.sh` auto-selects the next free port and prints it.
 - DB health wait timeout:
   - Check `docker compose ps` and container logs.
 - Backend/Frontend stale process:
   - Run `bash scripts/dev_down.sh`, then retry.
+- UI shows empty charts/cards:
+  - Run `bash scripts/doctor.sh`.
+  - If data is empty, doctor auto-runs `init_db` + ETL and re-checks.
 - Missing local dependencies in venv:
   - Script auto-installs via requirements files. Re-run the script.
