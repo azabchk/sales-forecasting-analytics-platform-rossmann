@@ -1,0 +1,12 @@
+version: v1
+contracts:
+  - id: rossmann_input_contract
+    name: Rossmann Input Contract
+    description: Canonical input contract for Rossmann train/store CSV ingestion.
+    is_active: true
+    versions:
+      - version: v1
+        created_at: "2026-02-22T00:00:00Z"
+        changed_by: platform-team
+        changelog: Initial contract baseline for validation, unification, and semantic rules.
+        schema_path: config/input_contract/contract_v1.yaml
