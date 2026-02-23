@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+source "$ROOT_DIR/scripts/lib/env.sh"
+
 LOG_DIR="$ROOT_DIR/artifacts/smoke"
 mkdir -p "$LOG_DIR"
 SMOKE_LOG="$LOG_DIR/smoke.log"
@@ -17,44 +19,12 @@ ML_SMOKE_MODE="${ML_SMOKE_MODE:-1}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 SMOKE_BACKEND_MODE="${SMOKE_BACKEND_MODE:-local}"
 
-ENV_FILE="$ROOT_DIR/.env"
-if [[ ! -f "$ENV_FILE" && -f "$ROOT_DIR/.env.example" ]]; then
-  cp "$ROOT_DIR/.env.example" "$ENV_FILE"
-  echo "[SMOKE] .env not found; created from .env.example"
-fi
+load_canonical_env "$ROOT_DIR"
+PORT_BACKEND="$BACKEND_PORT"
 
-load_env_file() {
-  local file_path="$1"
-  [[ -f "$file_path" ]] || return 0
-
-  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-    local line="${raw_line%$'\r'}"
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-      local key="${BASH_REMATCH[1]}"
-      local value="${BASH_REMATCH[2]}"
-      value="${value##[[:space:]]}"
-      value="${value%%[[:space:]]}"
-
-      if [[ "$value" =~ ^\"(.*)\"$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      fi
-
-      export "$key=$value"
-    fi
-  done < "$file_path"
+compose_cmd() {
+  docker compose --env-file "$ENV_FILE" "$@"
 }
-
-load_env_file "$ENV_FILE"
-
-export POSTGRES_DB="${POSTGRES_DB:-rossmann}"
-export POSTGRES_USER="${POSTGRES_USER:-rossmann_user}"
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-change_me}"
-export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:5432/$POSTGRES_DB}"
 
 port_in_use() {
   local port="$1"
@@ -86,7 +56,7 @@ if [[ "$BACKEND_PORT" != "$REQUESTED_BACKEND_PORT" ]]; then
   echo "[SMOKE] Requested backend port $REQUESTED_BACKEND_PORT is busy; using $BACKEND_PORT"
 fi
 export BACKEND_PORT
-export BACKEND_BASE_URL="${BACKEND_BASE_URL:-http://localhost:${BACKEND_PORT}}"
+export BACKEND_BASE_URL="http://localhost:${BACKEND_PORT}"
 BACKEND_PID=""
 BACKEND_LOG="$LOG_DIR/backend.log"
 
@@ -99,11 +69,11 @@ cleanup() {
   fi
 
   if command -v docker >/dev/null 2>&1; then
-    docker compose logs --no-color > "$COMPOSE_LOG" 2>/dev/null || true
+    compose_cmd logs --no-color > "$COMPOSE_LOG" 2>/dev/null || true
   fi
 
   if [[ "$KEEP_RUNNING" != "1" ]]; then
-    docker compose down --remove-orphans >/dev/null 2>&1 || true
+    compose_cmd down --remove-orphans >/dev/null 2>&1 || true
   fi
 
   if [[ $rc -eq 0 ]]; then
@@ -259,10 +229,10 @@ print(f"[SMOKE] Scenario points={len(points)} uplift={summary.get('"'"'uplift_pc
 echo "[SMOKE] Starting docker services..."
 if [[ "$SMOKE_BACKEND_MODE" == "docker" ]]; then
   echo "[SMOKE] Backend mode: docker"
-  docker compose up -d postgres backend
+  compose_cmd up -d postgres backend
 else
   echo "[SMOKE] Backend mode: local"
-  docker compose up -d postgres
+  compose_cmd up -d postgres
 fi
 
 wait_for_container_healthy "vkr_postgres" 120

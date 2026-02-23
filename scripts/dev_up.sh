@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+source "$ROOT_DIR/scripts/lib/env.sh"
+
 RUN_DIR="$ROOT_DIR/.run"
 mkdir -p "$RUN_DIR"
 
@@ -15,56 +17,24 @@ FRONTEND_LOG="$RUN_DIR/frontend.log"
 DEMO="${DEMO:-0}"
 AUTO_DOWN="${AUTO_DOWN:-0}"
 BACKEND_DOCKER="${BACKEND_DOCKER:-0}"
-PORT_BACKEND="${PORT_BACKEND:-${BACKEND_PORT:-8000}}"
-PORT_FRONTEND="${PORT_FRONTEND:-5173}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+FORCE_LOCAL_API_BASE="${FORCE_LOCAL_API_BASE:-1}"
 
-ENV_FILE="$ROOT_DIR/.env"
-if [[ ! -f "$ENV_FILE" ]]; then
-  ENV_FILE="$ROOT_DIR/.env.example"
-fi
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "[DEV] ERROR: neither .env nor .env.example exists."
-  exit 1
-fi
-
-load_env_file() {
-  local file_path="$1"
-  while IFS= read -r raw_line || [[ -n "$raw_line" ]]; do
-    local line="${raw_line%$'\r'}"
-    [[ "$line" =~ ^[[:space:]]*# ]] && continue
-    [[ "$line" =~ ^[[:space:]]*$ ]] && continue
-
-    if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
-      local key="${BASH_REMATCH[1]}"
-      local value="${BASH_REMATCH[2]}"
-      value="${value##[[:space:]]}"
-      value="${value%%[[:space:]]}"
-      if [[ "$value" =~ ^\"(.*)\"$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      elif [[ "$value" =~ ^\'(.*)\'$ ]]; then
-        value="${BASH_REMATCH[1]}"
-      fi
-      export "$key=$value"
-    fi
-  done < "$file_path"
-}
-
-load_env_file "$ENV_FILE"
-
-export POSTGRES_DB="${POSTGRES_DB:-rossmann}"
-export POSTGRES_USER="${POSTGRES_USER:-rossmann_user}"
-export POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-change_me}"
-export BACKEND_PORT="$PORT_BACKEND"
-export DATABASE_URL="${DATABASE_URL:-postgresql+psycopg2://$POSTGRES_USER:$POSTGRES_PASSWORD@localhost:5432/$POSTGRES_DB}"
+load_canonical_env "$ROOT_DIR"
+PORT_BACKEND="$BACKEND_PORT"
+PORT_FRONTEND="$FRONTEND_PORT"
 BACKEND_BASE_URL="http://localhost:${PORT_BACKEND}"
 FRONTEND_BASE_URL="http://localhost:${PORT_FRONTEND}"
+
+compose_cmd() {
+  docker compose --env-file "$ENV_FILE" "$@"
+}
 
 cleanup() {
   local rc=$?
   if [[ "$AUTO_DOWN" == "1" ]]; then
     echo "[DEV] AUTO_DOWN=1 -> stopping services."
-    KEEP_VOLUMES=1 bash "$ROOT_DIR/scripts/dev_down.sh" || true
+    bash "$ROOT_DIR/scripts/dev_down.sh" || true
   fi
   if [[ $rc -ne 0 ]]; then
     echo "[DEV] FAIL (exit=$rc)."
@@ -90,6 +60,19 @@ ensure_port_available() {
     echo "[DEV] ERROR: port $port is already in use ($owner)."
     exit 1
   fi
+}
+
+resolve_available_port() {
+  local requested="$1"
+  local candidate="$requested"
+  while port_in_use "$candidate"; do
+    candidate=$((candidate + 1))
+    if (( candidate > 8999 )); then
+      echo "[DEV] ERROR: unable to find free port starting from $requested"
+      exit 1
+    fi
+  done
+  echo "$candidate"
 }
 
 wait_for_container_healthy() {
@@ -196,6 +179,9 @@ start_local_backend() {
   (
     cd "$ROOT_DIR/backend"
     DATABASE_URL="$DATABASE_URL" \
+    CORS_ORIGINS="$CORS_ORIGINS" \
+    BACKEND_PORT="$PORT_BACKEND" \
+    FRONTEND_PORT="$PORT_FRONTEND" \
     PREFLIGHT_ALERTS_SCHEDULER_ENABLED=0 \
     PREFLIGHT_NOTIFICATIONS_SCHEDULER_ENABLED=0 \
     "$ROOT_DIR/backend/.venv311/bin/uvicorn" app.main:app --host 127.0.0.1 --port "$PORT_BACKEND"
@@ -211,17 +197,42 @@ start_frontend() {
 
   (
     cd "$ROOT_DIR/frontend"
-    npm run dev -- --host 127.0.0.1 --port "$PORT_FRONTEND"
+    VITE_API_BASE_URL="$VITE_API_BASE_URL" \
+    VITE_BACKEND_PORT="$PORT_BACKEND" \
+      npm run dev -- --host 127.0.0.1 --port "$PORT_FRONTEND"
   ) >"$FRONTEND_LOG" 2>&1 &
   echo "$!" > "$FRONTEND_PID_FILE"
   wait_for_http_ok "$FRONTEND_BASE_URL" 120
 }
 
+if [[ "$BACKEND_DOCKER" != "1" ]] && port_in_use "$PORT_BACKEND"; then
+  local_backend_port="$(resolve_available_port "$PORT_BACKEND")"
+  echo "[DEV] Requested backend port $PORT_BACKEND is busy; using $local_backend_port"
+  PORT_BACKEND="$local_backend_port"
+fi
+
+if port_in_use "$PORT_FRONTEND"; then
+  local_frontend_port="$(resolve_available_port "$PORT_FRONTEND")"
+  echo "[DEV] Requested frontend port $PORT_FRONTEND is busy; using $local_frontend_port"
+  PORT_FRONTEND="$local_frontend_port"
+fi
+
+export BACKEND_PORT="$PORT_BACKEND"
+export FRONTEND_PORT="$PORT_FRONTEND"
+BACKEND_BASE_URL="http://localhost:${PORT_BACKEND}"
+FRONTEND_BASE_URL="http://localhost:${PORT_FRONTEND}"
+if [[ "${VITE_API_BASE_URL_SOURCE:-fallback}" == "fallback" ]]; then
+  export VITE_API_BASE_URL="http://localhost:${PORT_BACKEND}/api/v1"
+elif [[ "$FORCE_LOCAL_API_BASE" == "1" ]]; then
+  export VITE_API_BASE_URL="http://localhost:${PORT_BACKEND}/api/v1"
+  export VITE_API_BASE_URL_SOURCE="dev_up_forced_local"
+fi
+
 echo "[DEV] Mode: $([[ "$DEMO" == "1" ]] && echo "demo" || echo "dev")"
-echo "[DEV] Using env file: $ENV_FILE"
+print_canonical_env_report "[DEV]"
 
 echo "[DEV] Starting postgres..."
-docker compose up -d postgres
+compose_cmd up -d postgres
 wait_for_container_healthy "vkr_postgres" 120
 
 echo "[DEV] Preparing backend tooling..."
@@ -243,7 +254,7 @@ fi
 
 if [[ "$BACKEND_DOCKER" == "1" ]]; then
   echo "[DEV] Starting backend in docker compose..."
-  docker compose up -d backend
+  compose_cmd up -d backend
   wait_for_container_healthy "vkr_backend" 300
 else
   echo "[DEV] Starting backend locally..."
