@@ -118,6 +118,19 @@ export type SystemSummary = {
   date_to?: string | null;
 };
 
+export type DataAvailabilityDataset = {
+  table_name: string;
+  rows: number;
+  min_date?: string | null;
+  max_date?: string | null;
+};
+
+export type DataAvailabilityResponse = {
+  generated_at: string;
+  data_source_ids: number[];
+  datasets: DataAvailabilityDataset[];
+};
+
 export type ModelMetricSet = {
   mae: number;
   rmse: number;
@@ -519,6 +532,11 @@ export async function fetchHealth(): Promise<HealthResponse> {
 
 export async function fetchSystemSummary(): Promise<SystemSummary> {
   const { data } = await apiClient.get<SystemSummary>("/system/summary");
+  return data;
+}
+
+export async function fetchDiagnosticsDataAvailability(): Promise<DataAvailabilityResponse> {
+  const { data } = await apiClient.get<DataAvailabilityResponse>("/diagnostics/preflight/data-availability");
   return data;
 }
 

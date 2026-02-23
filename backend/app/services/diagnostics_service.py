@@ -10,10 +10,13 @@ from typing import Any
 from typing import Literal
 from urllib.parse import quote
 
+import sqlalchemy as sa
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from app.db import fetch_all, fetch_one
 from src.etl.preflight_registry import (
     get_latest_preflight,
     get_preflight_run,
@@ -47,6 +50,16 @@ class DiagnosticsPayloadError(ValueError):
 SUPPORTED_SOURCES = {"train", "store"}
 SUPPORTED_MODES = {"off", "report_only", "enforce"}
 SUPPORTED_FINAL_STATUSES = {"PASS", "WARN", "FAIL"}
+AVAILABILITY_TABLES = (
+    "dim_store",
+    "dim_date",
+    "fact_sales_daily",
+    "data_source",
+    "preflight_run_registry",
+    "etl_run_registry",
+    "forecast_run_registry",
+    "ml_experiment_registry",
+)
 
 
 def _normalize_optional_text(value: str | None) -> str | None:
@@ -613,6 +626,68 @@ def _load_semantic_payload_with_fallback(record: dict[str, Any]) -> tuple[dict[s
     raise DiagnosticsNotFoundError(
         f"semantic artifact is not available for source '{record.get('source_name')}'"
     )
+
+
+def _table_exists(table_name: str) -> bool:
+    row = fetch_one(
+        sa.text("SELECT to_regclass(:table_name) AS regclass_name"),
+        {"table_name": f"public.{table_name}"},
+    )
+    if row is None:
+        return False
+    return row.get("regclass_name") is not None
+
+
+def _table_row_count(table_name: str) -> int:
+    if not _table_exists(table_name):
+        return 0
+    row = fetch_one(sa.text(f"SELECT COUNT(*)::bigint AS rows_count FROM {table_name}"))
+    if row is None:
+        return 0
+    return int(row.get("rows_count") or 0)
+
+
+def get_data_availability() -> dict[str, Any]:
+    datasets: list[dict[str, Any]] = []
+    for table_name in AVAILABILITY_TABLES:
+        datasets.append(
+            {
+                "table_name": table_name,
+                "rows": _table_row_count(table_name),
+                "min_date": None,
+                "max_date": None,
+            }
+        )
+
+    if _table_exists("fact_sales_daily") and _table_exists("dim_date"):
+        date_row = fetch_one(
+            sa.text(
+                """
+                SELECT
+                    MIN(d.full_date) AS min_date,
+                    MAX(d.full_date) AS max_date
+                FROM fact_sales_daily f
+                JOIN dim_date d ON d.date_id = f.date_id
+                """
+            )
+        )
+        if date_row is not None:
+            for dataset in datasets:
+                if dataset["table_name"] == "fact_sales_daily":
+                    dataset["min_date"] = date_row.get("min_date")
+                    dataset["max_date"] = date_row.get("max_date")
+                    break
+
+    data_source_ids: list[int] = []
+    if _table_exists("data_source"):
+        rows = fetch_all(sa.text("SELECT id FROM data_source ORDER BY id"))
+        data_source_ids = [int(row["id"]) for row in rows if row.get("id") is not None]
+
+    return {
+        "generated_at": datetime.now(timezone.utc),
+        "data_source_ids": data_source_ids,
+        "datasets": datasets,
+    }
 
 
 def list_preflight_run_summaries(

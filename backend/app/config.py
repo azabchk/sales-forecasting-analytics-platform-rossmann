@@ -7,6 +7,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     database_url: str
     cors_origins: str = "http://localhost:5173"
+    environment: str = "development"
+    frontend_port: int = 5173
     model_path: str = "ml/artifacts/model.joblib"
     model_metadata_path: str = "ml/artifacts/model_metadata.json"
     chat_model_path: str = "ml/artifacts/chat_intent_model.joblib"
@@ -23,7 +25,16 @@ class Settings(BaseSettings):
 
     @property
     def cors_list(self) -> list[str]:
-        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+        origins = [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+        if self.environment.lower() != "production":
+            dev_origins = [
+                f"http://localhost:{self.frontend_port}",
+                f"http://127.0.0.1:{self.frontend_port}",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
+            origins = list(dict.fromkeys([*origins, *dev_origins]))
+        return origins
 
 
 @lru_cache

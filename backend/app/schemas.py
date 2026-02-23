@@ -131,6 +131,19 @@ class SystemSummaryResponse(BaseModel):
     date_to: date | None = None
 
 
+class DataAvailabilityDatasetResponse(BaseModel):
+    table_name: str
+    rows: int
+    min_date: date | None = None
+    max_date: date | None = None
+
+
+class DataAvailabilityResponse(BaseModel):
+    generated_at: datetime
+    data_source_ids: list[int] = Field(default_factory=list)
+    datasets: list[DataAvailabilityDatasetResponse] = Field(default_factory=list)
+
+
 class ModelMetricSet(BaseModel):
     mae: float
     rmse: float

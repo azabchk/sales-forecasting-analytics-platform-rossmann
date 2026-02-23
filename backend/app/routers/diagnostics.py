@@ -15,6 +15,7 @@ from app.security.diagnostics_auth import (
 )
 from app.services.metrics_export_service import render_prometheus_metrics
 from app.schemas import (
+    DataAvailabilityResponse,
     NotificationDeliveryPageResponse,
     NotificationEndpointsResponse,
     PreflightAcknowledgeAlertRequest,
@@ -53,6 +54,7 @@ from app.services.diagnostics_service import (
     DiagnosticsPayloadError,
     get_latest_preflight_for_source,
     get_latest_preflight_run,
+    get_data_availability,
     get_preflight_stats,
     get_preflight_source_artifact_download,
     get_preflight_source_artifacts,
@@ -144,6 +146,17 @@ def diagnostics_preflight_runs(
         return PreflightRunsListResponse(items=items, limit=limit, source_name=source_name)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
+
+
+@router.get("/diagnostics/preflight/data-availability", response_model=DataAvailabilityResponse)
+def diagnostics_preflight_data_availability(
+    _principal: DiagnosticsPrincipal = Depends(require_scope("diagnostics:read")),
+) -> DataAvailabilityResponse:
+    try:
+        payload = get_data_availability()
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=f"Diagnostics error: {exc}") from exc
+    return DataAvailabilityResponse.model_validate(payload)
 
 
 @router.get("/diagnostics/preflight/runs/{run_id}", response_model=PreflightRunDetailResponse)
