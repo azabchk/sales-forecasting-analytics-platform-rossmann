@@ -1,16 +1,54 @@
 import React, { useMemo, useState } from "react";
 
-import { extractApiError } from "../api/client";
-import { fetchPromoImpact, fetchSalesTimeseries, fetchStores, PromoImpactPoint, SalesPoint, Store } from "../api/endpoints";
+import { API_BASE_URL, extractApiError } from "../api/client";
+import {
+  fetchPromoImpact,
+  fetchSalesTimeseries,
+  fetchStores,
+  fetchSystemSummary,
+  PromoImpactPoint,
+  SalesPoint,
+  Store,
+  SystemSummary,
+} from "../api/endpoints";
 import LoadingBlock from "../components/LoadingBlock";
 import SalesChart from "../components/SalesChart";
 import StoreSelector from "../components/StoreSelector";
+import { NoDataState } from "../components/ui/States";
 import { rangeFromPastDays } from "../lib/dates";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 
 function getDefaultRange() {
   return rangeFromPastDays(60);
+}
+
+function buildRangeFromAvailability(summary: SystemSummary | null): { from: string; to: string } {
+  if (summary?.date_from && summary?.date_to) {
+    return {
+      from: summary.date_from,
+      to: summary.date_to,
+    };
+  }
+  return getDefaultRange();
+}
+
+function buildTrailingRange(summary: SystemSummary | null, days: number): { from: string; to: string } {
+  const fallback = rangeFromPastDays(days);
+  if (!summary?.date_from || !summary?.date_to) {
+    return fallback;
+  }
+
+  const startBound = new Date(summary.date_from);
+  const endBound = new Date(summary.date_to);
+  const candidateFrom = new Date(endBound);
+  candidateFrom.setDate(candidateFrom.getDate() - (days - 1));
+  const effectiveFrom = candidateFrom < startBound ? startBound : candidateFrom;
+
+  return {
+    from: effectiveFrom.toISOString().slice(0, 10),
+    to: endBound.toISOString().slice(0, 10),
+  };
 }
 
 export default function StoreAnalytics() {
@@ -28,6 +66,8 @@ export default function StoreAnalytics() {
   const [promoImpact, setPromoImpact] = useState<PromoImpactPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [systemSummary, setSystemSummary] = useState<SystemSummary | null>(null);
+  const [didAutoApplyRange, setDidAutoApplyRange] = useState(false);
   const invalidRange = dateFrom > dateTo;
 
   React.useEffect(() => {
@@ -40,11 +80,40 @@ export default function StoreAnalytics() {
       );
   }, []);
 
-  const applyPreset = React.useCallback((days: number) => {
-    const range = rangeFromPastDays(days);
+  React.useEffect(() => {
+    fetchSystemSummary()
+      .then((summary) => {
+        setSystemSummary(summary);
+      })
+      .catch(() => {
+        setSystemSummary(null);
+      });
+  }, []);
+
+  React.useEffect(() => {
+    if (didAutoApplyRange) {
+      return;
+    }
+
+    const range = buildRangeFromAvailability(systemSummary);
     setDateFrom(range.from);
     setDateTo(range.to);
-  }, []);
+    setDidAutoApplyRange(true);
+  }, [didAutoApplyRange, systemSummary]);
+
+  const applyPreset = React.useCallback((days: number) => {
+    const range = buildTrailingRange(systemSummary, days);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }, [systemSummary]);
+
+  const resetFilters = React.useCallback(() => {
+    const range = buildRangeFromAvailability(systemSummary);
+    setStoreId(undefined);
+    setGranularity("daily");
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }, [systemSummary]);
 
   const load = React.useCallback(async () => {
     if (invalidRange) {
@@ -217,7 +286,16 @@ export default function StoreAnalytics() {
       {chartData.length > 0 ? (
         <SalesChart data={chartData} title={locale === "ru" ? "Тренд продаж и клиентов" : "Sales and Customers Trend"} showCustomers granularity={granularity} />
       ) : (
-        !loading && <p className="muted">{locale === "ru" ? "Нет наблюдений за выбранный период." : "No daily observations for current filters."}</p>
+        !loading && (
+          <NoDataState
+            message={locale === "ru" ? "Нет наблюдений за выбранный период." : "No daily observations for current filters."}
+            filtersLabel={`${locale === "ru" ? "Фильтры" : "Filters"}: store=${storeId ?? "all"}, from=${dateFrom}, to=${dateTo}, granularity=${granularity}`}
+            apiBaseUrl={API_BASE_URL}
+            hint={locale === "ru" ? "Подсказка: DEMO=1 bash scripts/dev_up.sh" : "Hint: DEMO=1 bash scripts/dev_up.sh"}
+            onReset={resetFilters}
+            resetLabel={locale === "ru" ? "Сбросить фильтры" : "Reset filters"}
+          />
+        )
       )}
 
       <div className="panel">

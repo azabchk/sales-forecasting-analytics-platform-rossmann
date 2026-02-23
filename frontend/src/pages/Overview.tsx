@@ -1,11 +1,20 @@
 import React, { useCallback, useMemo, useState } from "react";
 
-import { extractApiError } from "../api/client";
-import { fetchKpiSummary, fetchSalesTimeseries, fetchStores, KpiSummary, Store } from "../api/endpoints";
+import { API_BASE_URL, extractApiError } from "../api/client";
+import {
+  fetchKpiSummary,
+  fetchSalesTimeseries,
+  fetchStores,
+  fetchSystemSummary,
+  KpiSummary,
+  Store,
+  SystemSummary,
+} from "../api/endpoints";
 import KpiCards from "../components/KpiCards";
 import LoadingBlock from "../components/LoadingBlock";
 import SalesChart from "../components/SalesChart";
 import StoreSelector from "../components/StoreSelector";
+import { NoDataState } from "../components/ui/States";
 import { rangeFromPastDays, rangeYtd } from "../lib/dates";
 import { formatInt, formatPercent } from "../lib/format";
 import { useI18n } from "../lib/i18n";
@@ -18,6 +27,50 @@ type OverviewSalesPoint = {
 
 function getDefaultRange() {
   return rangeFromPastDays(90);
+}
+
+function buildRangeFromAvailability(summary: SystemSummary | null): { from: string; to: string } {
+  if (summary?.date_from && summary?.date_to) {
+    return {
+      from: summary.date_from,
+      to: summary.date_to,
+    };
+  }
+  return getDefaultRange();
+}
+
+function buildTrailingRange(summary: SystemSummary | null, days: number): { from: string; to: string } {
+  const fallback = rangeFromPastDays(days);
+  if (!summary?.date_from || !summary?.date_to) {
+    return fallback;
+  }
+
+  const startBound = new Date(summary.date_from);
+  const endBound = new Date(summary.date_to);
+  const candidateFrom = new Date(endBound);
+  candidateFrom.setDate(candidateFrom.getDate() - (days - 1));
+  const effectiveFrom = candidateFrom < startBound ? startBound : candidateFrom;
+
+  return {
+    from: effectiveFrom.toISOString().slice(0, 10),
+    to: endBound.toISOString().slice(0, 10),
+  };
+}
+
+function buildYtdRange(summary: SystemSummary | null): { from: string; to: string } {
+  if (!summary?.date_from || !summary?.date_to) {
+    return rangeYtd();
+  }
+
+  const startBound = new Date(summary.date_from);
+  const endBound = new Date(summary.date_to);
+  const ytdStart = new Date(endBound.getFullYear(), 0, 1);
+  const effectiveFrom = ytdStart < startBound ? startBound : ytdStart;
+
+  return {
+    from: effectiveFrom.toISOString().slice(0, 10),
+    to: endBound.toISOString().slice(0, 10),
+  };
 }
 
 export default function Overview() {
@@ -36,6 +89,8 @@ export default function Overview() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>("");
   const [storesError, setStoresError] = useState("");
+  const [systemSummary, setSystemSummary] = useState<SystemSummary | null>(null);
+  const [didAutoApplyRange, setDidAutoApplyRange] = useState(false);
 
   React.useEffect(() => {
     fetchStores()
@@ -47,13 +102,45 @@ export default function Overview() {
       );
   }, []);
 
+  React.useEffect(() => {
+    fetchSystemSummary()
+      .then((summary) => {
+        setSystemSummary(summary);
+      })
+      .catch(() => {
+        setSystemSummary(null);
+      });
+  }, []);
+
+  React.useEffect(() => {
+    if (didAutoApplyRange) {
+      return;
+    }
+
+    const range = buildRangeFromAvailability(systemSummary);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setDidAutoApplyRange(true);
+  }, [didAutoApplyRange, systemSummary]);
+
   const invalidRange = dateFrom > dateTo;
 
   const applyPreset = useCallback((type: "30d" | "90d" | "365d" | "ytd") => {
-    const range = type === "ytd" ? rangeYtd() : rangeFromPastDays(type === "30d" ? 30 : type === "90d" ? 90 : 365);
+    const range =
+      type === "ytd"
+        ? buildYtdRange(systemSummary)
+        : buildTrailingRange(systemSummary, type === "30d" ? 30 : type === "90d" ? 90 : 365);
     setDateFrom(range.from);
     setDateTo(range.to);
-  }, []);
+  }, [systemSummary]);
+
+  const resetFilters = useCallback(() => {
+    const range = buildRangeFromAvailability(systemSummary);
+    setStoreId(undefined);
+    setGranularity("daily");
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }, [systemSummary]);
 
   const load = useCallback(async () => {
     if (invalidRange) {
@@ -238,7 +325,16 @@ export default function Overview() {
       {series.length > 0 ? (
         <SalesChart data={series} title={locale === "ru" ? "Тренд общих продаж" : "Total Sales Trend"} granularity={granularity} />
       ) : (
-        !loading && <p className="muted">{locale === "ru" ? "Нет данных продаж для выбранных фильтров." : "No sales rows for selected filters."}</p>
+        !loading && (
+          <NoDataState
+            message={locale === "ru" ? "Нет данных продаж для выбранных фильтров." : "No sales rows for selected filters."}
+            filtersLabel={`${locale === "ru" ? "Фильтры" : "Filters"}: store=${storeId ?? "all"}, from=${dateFrom}, to=${dateTo}, granularity=${granularity}`}
+            apiBaseUrl={API_BASE_URL}
+            hint={locale === "ru" ? "Подсказка: DEMO=1 bash scripts/dev_up.sh" : "Hint: DEMO=1 bash scripts/dev_up.sh"}
+            onReset={resetFilters}
+            resetLabel={locale === "ru" ? "Сбросить фильтры" : "Reset filters"}
+          />
+        )
       )}
     </section>
   );
