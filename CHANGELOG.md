@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Placeholder for upcoming changes after `v2.0.0`.
 
+### Security
+- Frontend dependency audit note:
+  - `npm audit` reports `GHSA-67mh-4wv8-2f99` in `esbuild` (transitive via `vite@5.4.21`).
+  - `npm audit fix` did not resolve this without a major bump (`vite@7.x`) requiring breaking-change validation.
+  - Current mitigation: keep dependencies pinned and continue CI build/smoke verification until a vetted major upgrade is scheduled.
+
 ## [2.0.0] - 2026-02-23
 
 ### Added
