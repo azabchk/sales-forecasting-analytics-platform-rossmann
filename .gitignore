@@ -32,6 +32,7 @@ dist/
 build/
 *.log
 .run/
+artifacts/
 
 # IDE
 .vscode/
