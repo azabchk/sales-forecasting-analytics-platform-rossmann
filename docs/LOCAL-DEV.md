@@ -72,9 +72,17 @@ Run a full doctor report (runtime logs, DB table checks, API checks, and auto-re
 bash scripts/doctor.sh
 ```
 
+Capture route-level UI evidence (screenshots, browser netlogs, API dumps, and `BUG_*.md` checklists):
+
+```bash
+DOCTOR_CAPTURE_UI=1 bash scripts/doctor.sh
+```
+
 The report is saved under:
 
 - `artifacts/doctor/doctor-*.log`
+- UI debug bundle (when enabled or on doctor failure):
+  - `artifacts/ui-debug/<timestamp>/`
 
 ## Common Issues
 

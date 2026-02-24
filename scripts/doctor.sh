@@ -13,6 +13,8 @@ exec > >(tee "$REPORT_FILE") 2>&1
 
 PYTHON_BIN="${PYTHON_BIN:-python3}"
 STARTED_LOCAL_BACKEND_PID=""
+DOCTOR_CAPTURE_UI="${DOCTOR_CAPTURE_UI:-0}"
+UI_DEBUG_ARTIFACTS_PATH=""
 
 load_canonical_env "$ROOT_DIR"
 
@@ -164,10 +166,15 @@ cleanup() {
     wait "$STARTED_LOCAL_BACKEND_PID" >/dev/null 2>&1 || true
   fi
 
+  ln -sfn "$REPORT_FILE" "$LOG_DIR/latest.log"
+
   if [[ $rc -eq 0 ]]; then
     echo "[DOCTOR] PASS"
   else
     echo "[DOCTOR] FAIL (exit=$rc)"
+  fi
+  if [[ -n "$UI_DEBUG_ARTIFACTS_PATH" ]]; then
+    echo "[DOCTOR] UI debug artifacts: $UI_DEBUG_ARTIFACTS_PATH"
   fi
   echo "[DOCTOR] Report: $REPORT_FILE"
 }
@@ -432,6 +439,22 @@ run_http_checks() {
   fi
 }
 
+capture_ui_debug_bundle() {
+  local frontend_url="http://localhost:${FRONTEND_PORT}"
+  local backend_url="$BACKEND_BASE_URL_RUNTIME"
+  local before_count after_count
+  mkdir -p "$ROOT_DIR/artifacts/ui-debug"
+  before_count="$(find "$ROOT_DIR/artifacts/ui-debug" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+  if bash "$ROOT_DIR/scripts/ui_debug_capture.sh" --backend-url "$backend_url" --frontend-url "$frontend_url"; then
+    after_count="$(find "$ROOT_DIR/artifacts/ui-debug" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$after_count" =~ ^[0-9]+$ ]] && [[ "$before_count" =~ ^[0-9]+$ ]] && (( after_count > before_count )); then
+      UI_DEBUG_ARTIFACTS_PATH="$(find "$ROOT_DIR/artifacts/ui-debug" -mindepth 1 -maxdepth 1 -type d | sort | tail -n 1)"
+    fi
+  else
+    echo "[DOCTOR] WARN: ui_debug_capture failed"
+  fi
+}
+
 report_header
 DB_OK="0"
 DB_IDENTITY_OK="0"
@@ -460,11 +483,17 @@ if [[ "$DB_OK" == "1" && "$HTTP_OK" == "1" ]]; then
   if [[ "$DB_IDENTITY_OK" != "1" ]]; then
     echo "[DOCTOR] Note: compose backend identity differs from local (usually host alias difference)."
   fi
+  if [[ "$DOCTOR_CAPTURE_UI" == "1" ]]; then
+    echo "[DOCTOR] Capturing UI debug bundle (DOCTOR_CAPTURE_UI=1)..."
+    capture_ui_debug_bundle
+  fi
 else
   echo
   echo "[DOCTOR] Summary: FAIL"
   if [[ "$DB_OK" != "1" ]]; then
     echo "[DOCTOR] Hint: run DEMO=1 bash scripts/dev_up.sh"
   fi
+  echo "[DOCTOR] Capturing UI debug bundle for failure analysis..."
+  capture_ui_debug_bundle
   exit 1
 fi
