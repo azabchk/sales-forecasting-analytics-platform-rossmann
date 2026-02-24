@@ -1,4 +1,4 @@
-﻿fastapi==0.115.6
+fastapi==0.115.6
 uvicorn[standard]==0.32.1
 gunicorn==23.0.0
 APScheduler==3.10.4
@@ -12,4 +12,4 @@ pandas==2.2.3
 joblib==1.4.2
 numpy==1.26.4
 scikit-learn==1.5.2
-catboost==1.2.7
+catboost==1.2.10
