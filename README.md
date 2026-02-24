@@ -180,6 +180,12 @@ Run automated diagnostics (logs + DB checks + API checks + auto-remediation for 
 bash scripts/doctor.sh
 ```
 
+Capture full UI-debug evidence bundle (screenshots, netlogs, API dumps, route checklists):
+
+```bash
+DOCTOR_CAPTURE_UI=1 bash scripts/doctor.sh
+```
+
 See full local setup and troubleshooting:
 
 - `docs/LOCAL-DEV.md`
@@ -201,6 +207,11 @@ Automation scripts:
 
 - `bash scripts/prod_env_check.sh`
 - `bash scripts/release_and_deploy_plan.sh`
+- `bash scripts/autopilot_deploy.sh` (token-driven Vercel + Cloudflare deployment automation)
+
+Autopilot deployment doc:
+
+- `docs/AUTOPILOT.md`
 
 ## Windows 11 (Recommended Local Flow)
 

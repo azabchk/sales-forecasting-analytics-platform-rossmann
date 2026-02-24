@@ -68,3 +68,11 @@ nslookup api.yourcompany.com
 curl -I https://app.yourcompany.com
 curl -I https://api.yourcompany.com/api/v1/health
 ```
+
+## 7) API Automation
+
+If you provide Cloudflare + Vercel tokens, DNS records can be upserted automatically:
+
+```bash
+bash scripts/autopilot_deploy.sh
+```

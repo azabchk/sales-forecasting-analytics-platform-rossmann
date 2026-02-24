@@ -9,6 +9,9 @@ Backend domain target: `api.yourcompany.com`
 1. In Render, click **New -> Blueprint**.
 2. Select this repository and point to `infra/render/render.yaml`.
 3. Render creates the web service from blueprint.
+4. Keep startup binding on Render requirements:
+   - host: `0.0.0.0`
+   - port: `$PORT` (Render injects this automatically)
 
 ### 2) Configure Secrets
 
@@ -26,6 +29,10 @@ In Render service -> Environment:
 
 1. Add custom domain in Render: `api.yourcompany.com`
 2. Add DNS records as shown in `docs/DOMAIN-DNS.md`
+
+Autopilot option:
+
+- `bash scripts/autopilot_deploy.sh` (uses Cloudflare + Vercel automation and Render API fallback strategy).
 
 ## Option B (Alternative): Fly.io
 

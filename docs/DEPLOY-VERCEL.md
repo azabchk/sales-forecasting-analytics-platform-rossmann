@@ -29,6 +29,11 @@ For staging project:
    - `app.yourcompany.com` (production)
    - `stg-app.yourcompany.com` (staging project)
 2. Follow Vercel DNS target instructions in `docs/DOMAIN-DNS.md`.
+3. Subdomain CNAME target is usually `cname.vercel-dns.com`.
+
+Autopilot option:
+
+- `bash scripts/autopilot_deploy.sh` configures the project domain and DNS records (when tokens are set).
 
 ## 4) Verify
 
