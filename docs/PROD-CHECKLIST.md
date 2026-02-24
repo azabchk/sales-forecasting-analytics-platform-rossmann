@@ -27,6 +27,13 @@ Use this checklist before go-live.
 - [ ] Keep `.env.production` out of git.
 - [ ] Use separate secrets per environment (`staging` vs `production`).
 - [ ] Rotate DB credentials and API keys on schedule.
+- [ ] Verify logs/artifacts redact DB passwords and API tokens.
+
+## Database Change Safety
+
+- [ ] Apply schema changes using additive migrations only (expand/migrate/contract).
+- [ ] Keep nullable/new columns and new tables backward-compatible with existing routes.
+- [ ] Confirm `scripts/init_db.py` SQL bundle updates are documented before release.
 
 ## Database Backups
 

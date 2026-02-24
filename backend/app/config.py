@@ -6,7 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     database_url: str
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = ""
     cors_allow_origins: str | None = None
     environment: str = "development"
     frontend_port: int = 5173
@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     def cors_list(self) -> list[str]:
         raw_origins = self.cors_allow_origins if self.cors_allow_origins else self.cors_origins
         origins = [item.strip() for item in raw_origins.split(",") if item.strip()]
+        if self.environment.lower() == "production":
+            # In production we only trust explicitly configured allowlist origins.
+            return origins
+
         if self.environment.lower() != "production":
             dev_origins = [
                 f"http://localhost:{self.frontend_port}",
