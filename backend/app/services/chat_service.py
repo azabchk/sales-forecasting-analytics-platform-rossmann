@@ -308,16 +308,84 @@ def _chat_help() -> ChatResponse:
     )
 
 
+def _chat_data_status() -> ChatResponse:
+    summary = get_system_summary()
+    date_to = summary.get("date_to")
+    date_from = summary.get("date_from")
+    rows = summary.get("sales_rows_count", 0)
+    stores = summary.get("stores_count", 0)
+    answer = (
+        f"The platform holds {rows:,} daily sales records across {stores:,} stores, "
+        f"spanning from {date_from} to {date_to}. "
+        f"Latest data date is {date_to}."
+    )
+    return ChatResponse(
+        answer=answer,
+        insights=[
+            ChatInsight(label="Latest Date", value=str(date_to)),
+            ChatInsight(label="Sales Rows", value=f"{rows:,}"),
+            ChatInsight(label="Stores", value=f"{stores:,}"),
+        ],
+        suggestions=[
+            "Show top 5 stores by total sales",
+            "What is the model accuracy?",
+            "Forecast store 1 for 30 days",
+        ],
+    )
+
+
+def _chat_compare_stores(message: str) -> ChatResponse:
+    import re
+    ids = re.findall(r'\b(\d{1,4})\b', message)
+    ids_int = [int(i) for i in ids[:2]]
+    if len(ids_int) < 2:
+        return ChatResponse(
+            answer="Please provide two store IDs to compare, e.g. 'Compare store 1 and store 2'.",
+            suggestions=["Compare store 1 and store 2", "Show top 5 stores by total sales"],
+        )
+
+    rows = fetch_all(
+        sa.text(
+            """
+            SELECT s.store_id, s.store_type, s.assortment,
+                   COALESCE(SUM(f.sales),0) AS total_sales,
+                   COALESCE(AVG(f.sales),0) AS avg_daily_sales
+            FROM dim_store s
+            LEFT JOIN fact_sales_daily f ON f.store_id = s.store_id
+            WHERE s.store_id = ANY(:ids)
+            GROUP BY s.store_id, s.store_type, s.assortment
+            """
+        ),
+        {"ids": ids_int},
+    )
+    if not rows:
+        return ChatResponse(answer=f"No data found for stores {ids_int}.")
+
+    lines = [f"Store {r['store_id']} ({r['store_type']}, {r['assortment']}): total={_format_number(float(r['total_sales']))}, avg daily={_format_number(float(r['avg_daily_sales']))}" for r in rows]
+    answer = "Comparison: " + " | ".join(lines)
+
+    return ChatResponse(
+        answer=answer,
+        insights=[ChatInsight(label=f"Store {r['store_id']}", value=_format_number(float(r['total_sales']))) for r in rows],
+        suggestions=[f"Forecast store {ids_int[0]} for 30 days", f"What is the promo impact for store {ids_int[0]}?"],
+    )
+
+
 def _heuristic_intent(message: str) -> str:
     lowered = message.lower()
     if any(term in lowered for term in ["hello", "hi", "hey", "مرحبا", "اهلا", "ازيك"]):
         return "greeting"
+    if any(term in lowered for term in ["compare", "vs", "versus", "مقارنة"]) and "store" in lowered:
+        return "compare_stores"
     if any(
         term in lowered
-        for term in ["coverage", "how many stores", "rows", "system summary", "data range", "عدد المتاجر", "حجم الداتا"]
+        for term in ["coverage", "how many stores", "rows", "system summary", "data range", "fresh", "latest date",
+                     "عدد المتاجر", "حجم الداتا", "اخر داتا", "آخر تاريخ"]
     ):
         return "system_summary"
-    if any(term in lowered for term in ["model", "accuracy", "mae", "rmse", "mape", "feature importance", "المودل", "دقة"]):
+    if any(term in lowered for term in ["data status", "pipeline", "etl", "data age", "last update"]):
+        return "data_status"
+    if any(term in lowered for term in ["model", "accuracy", "mae", "rmse", "mape", "feature importance", "drift", "retrain", "المودل", "دقة"]):
         return "model_summary"
     if ("top" in lowered and "store" in lowered) or "اعلى المتاجر" in lowered:
         return "top_stores"
@@ -359,13 +427,36 @@ def _predict_intent(message: str) -> tuple[str | None, float]:
         return None, 0.0
 
 
-def _resolve_intent(message: str) -> str:
+def _resolve_intent(message: str) -> tuple[str, float | None]:
+    """Return (intent, confidence). confidence is None when heuristic fallback is used."""
     predicted_intent, confidence = _predict_intent(message)
     settings = get_settings()
     threshold = max(settings.chat_min_confidence, 0.0)
     if predicted_intent and confidence >= threshold:
-        return predicted_intent
-    return _heuristic_intent(message)
+        return predicted_intent, float(confidence)
+    return _heuristic_intent(message), None
+
+
+def _dispatch_intent(intent: str, message: str) -> ChatResponse:
+    if intent == "greeting":
+        return _chat_help()
+    if intent == "system_summary":
+        return _chat_system_summary()
+    if intent == "data_status":
+        return _chat_data_status()
+    if intent == "model_summary":
+        return _chat_model_summary()
+    if intent == "top_stores":
+        return _chat_top_stores()
+    if intent == "promo_impact":
+        return _chat_promo_impact(message)
+    if intent == "forecast":
+        return _chat_forecast(message)
+    if intent == "kpi_summary":
+        return _chat_kpi_summary(message)
+    if intent == "compare_stores":
+        return _chat_compare_stores(message)
+    return _chat_help()
 
 
 def answer_chat_query(message: str) -> ChatResponse:
@@ -373,19 +464,8 @@ def answer_chat_query(message: str) -> ChatResponse:
     if not normalized:
         return ChatResponse(answer="Please enter a question.")
 
-    intent = _resolve_intent(normalized)
-    if intent == "greeting":
-        return _chat_help()
-    if intent == "system_summary":
-        return _chat_system_summary()
-    if intent == "model_summary":
-        return _chat_model_summary()
-    if intent == "top_stores":
-        return _chat_top_stores()
-    if intent == "promo_impact":
-        return _chat_promo_impact(normalized)
-    if intent == "forecast":
-        return _chat_forecast(normalized)
-    if intent == "kpi_summary":
-        return _chat_kpi_summary(normalized)
-    return _chat_help()
+    intent, confidence = _resolve_intent(normalized)
+    response = _dispatch_intent(intent, normalized)
+    response.detected_intent = intent
+    response.confidence_score = confidence
+    return response

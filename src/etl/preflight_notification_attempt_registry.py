@@ -231,6 +231,7 @@ def query_delivery_attempts(
     date_to: datetime | None = None,
     date_field: str = "started_at",
     limit: int | None = None,
+    offset: int | None = None,
     descending: bool = True,
     database_url: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -244,7 +245,40 @@ def query_delivery_attempts(
     if date_field not in date_column_map:
         raise ValueError(f"Unsupported date_field '{date_field}'. Use one of {sorted(date_column_map)}.")
 
-    query = sa.select(_ATTEMPT_TABLE)
+    selected_date_column = date_column_map[date_field]
+    query = _apply_attempt_filters(
+        sa.select(_ATTEMPT_TABLE),
+        attempt_statuses=attempt_statuses,
+        event_type=event_type,
+        channel_target=channel_target,
+        alert_id=alert_id,
+        date_from=date_from,
+        date_to=date_to,
+        date_column=selected_date_column,
+    )
+
+    query = query.order_by(selected_date_column.desc() if descending else selected_date_column.asc())
+    if limit is not None:
+        query = query.limit(max(1, min(int(limit), 100000)))
+    if offset is not None:
+        query = query.offset(max(0, int(offset)))
+
+    with engine.connect() as conn:
+        rows = conn.execute(query).mappings().all()
+    return [_serialize_row(dict(row)) for row in rows]
+
+
+def _apply_attempt_filters(
+    query: sa.sql.Select,
+    *,
+    attempt_statuses: tuple[str, ...] | None,
+    event_type: str | None,
+    channel_target: str | None,
+    alert_id: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    date_column: sa.Column[Any],
+) -> sa.sql.Select:
     if attempt_statuses:
         normalized_statuses = tuple(
             str(status).strip().upper()
@@ -259,22 +293,114 @@ def query_delivery_attempts(
         query = query.where(_ATTEMPT_TABLE.c.channel_target == str(channel_target).strip())
     if alert_id:
         query = query.where(_ATTEMPT_TABLE.c.alert_id == str(alert_id).strip())
-
-    selected_date_column = date_column_map[date_field]
     if date_from is not None:
         normalized_from = _ensure_datetime(date_from, default_now=False)
-        query = query.where(selected_date_column >= normalized_from)
+        query = query.where(date_column >= normalized_from)
     if date_to is not None:
         normalized_to = _ensure_datetime(date_to, default_now=False)
-        query = query.where(selected_date_column <= normalized_to)
+        query = query.where(date_column <= normalized_to)
+    return query
 
-    query = query.order_by(selected_date_column.desc() if descending else selected_date_column.asc())
-    if limit is not None:
-        query = query.limit(max(1, min(int(limit), 100000)))
+
+def count_delivery_attempts(
+    *,
+    attempt_statuses: tuple[str, ...] | None = None,
+    event_type: str | None = None,
+    channel_target: str | None = None,
+    alert_id: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    date_field: str = "started_at",
+    database_url: str | None = None,
+) -> int:
+    engine = _ensure_attempt_table(database_url)
+    date_column_map = {
+        "started_at": _ATTEMPT_TABLE.c.started_at,
+        "completed_at": _ATTEMPT_TABLE.c.completed_at,
+        "created_at": _ATTEMPT_TABLE.c.created_at,
+    }
+    if date_field not in date_column_map:
+        raise ValueError(f"Unsupported date_field '{date_field}'. Use one of {sorted(date_column_map)}.")
+
+    selected_date_column = date_column_map[date_field]
+    query = _apply_attempt_filters(
+        sa.select(sa.func.count()).select_from(_ATTEMPT_TABLE),
+        attempt_statuses=attempt_statuses,
+        event_type=event_type,
+        channel_target=channel_target,
+        alert_id=alert_id,
+        date_from=date_from,
+        date_to=date_to,
+        date_column=selected_date_column,
+    )
+    with engine.connect() as conn:
+        total = conn.execute(query).scalar_one()
+    return int(total or 0)
+
+
+def aggregate_delivery_attempt_metrics(
+    *,
+    latency_buckets_ms: tuple[float, ...],
+    database_url: str | None = None,
+) -> dict[str, Any]:
+    engine = _ensure_attempt_table(database_url)
+    normalized_buckets = tuple(
+        sorted({max(0, int(float(bucket))) for bucket in latency_buckets_ms})
+    )
+
+    channel_expr = sa.func.coalesce(_ATTEMPT_TABLE.c.channel_target, "unknown")
+    event_expr = sa.func.upper(sa.func.coalesce(_ATTEMPT_TABLE.c.event_type, "UNKNOWN"))
+    status_expr = sa.func.upper(sa.func.coalesce(_ATTEMPT_TABLE.c.attempt_status, "UNKNOWN"))
+
+    grouped_query = (
+        sa.select(
+            channel_expr.label("channel_target"),
+            event_expr.label("event_type"),
+            status_expr.label("attempt_status"),
+            sa.func.count().label("count"),
+        )
+        .select_from(_ATTEMPT_TABLE)
+        .group_by(channel_expr, event_expr, status_expr)
+    )
+
+    valid_duration = sa.and_(
+        _ATTEMPT_TABLE.c.duration_ms.is_not(None),
+        _ATTEMPT_TABLE.c.duration_ms >= 0,
+    )
+    latency_columns = [
+        sa.func.sum(sa.case((sa.and_(valid_duration, _ATTEMPT_TABLE.c.duration_ms <= bucket), 1), else_=0)).label(
+            f"bucket_{index}"
+        )
+        for index, bucket in enumerate(normalized_buckets)
+    ]
+    latency_query = sa.select(
+        sa.func.sum(sa.case((valid_duration, 1), else_=0)).label("latency_count"),
+        sa.func.sum(sa.case((valid_duration, _ATTEMPT_TABLE.c.duration_ms), else_=0)).label("latency_sum_ms"),
+        *latency_columns,
+    ).select_from(_ATTEMPT_TABLE)
 
     with engine.connect() as conn:
-        rows = conn.execute(query).mappings().all()
-    return [_serialize_row(dict(row)) for row in rows]
+        grouped_rows = conn.execute(grouped_query).mappings().all()
+        latency_row = conn.execute(latency_query).mappings().first() or {}
+
+    grouped_payload = [_serialize_row(dict(row)) for row in grouped_rows]
+    dispatch_errors_total = sum(
+        int(row.get("count", 0))
+        for row in grouped_payload
+        if str(row.get("attempt_status", "")).upper() in {"RETRY", "DEAD", "FAILED"}
+    )
+    latency_bucket_counts = {
+        bucket: int(latency_row.get(f"bucket_{index}") or 0)
+        for index, bucket in enumerate(normalized_buckets)
+    }
+
+    return {
+        "grouped_counts": grouped_payload,
+        "dispatch_errors_total": int(dispatch_errors_total),
+        "latency_count": int(latency_row.get("latency_count") or 0),
+        "latency_sum_ms": float(latency_row.get("latency_sum_ms") or 0.0),
+        "latency_bucket_counts": latency_bucket_counts,
+    }
 
 
 def list_delivery_attempts(

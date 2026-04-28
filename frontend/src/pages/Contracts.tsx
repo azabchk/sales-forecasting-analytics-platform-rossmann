@@ -11,7 +11,7 @@ import {
 } from "../api/endpoints";
 import PageLayout from "../components/layout/PageLayout";
 import Card from "../components/ui/Card";
-import DataTable from "../components/ui/DataTable";
+import DataTable, { SmartColumn, SmartTable } from "../components/ui/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import { useI18n } from "../lib/i18n";
 
@@ -136,30 +136,20 @@ export default function ContractsPage() {
 
       {contracts.length > 0 ? (
         <Card title={locale === "ru" ? "Контракты" : "Contracts"} subtitle="YAML-backed contract registry">
-          <DataTable>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>{locale === "ru" ? "Название" : "Name"}</th>
-                <th>{locale === "ru" ? "Последняя версия" : "Latest Version"}</th>
-                <th>{locale === "ru" ? "Версий" : "Versions"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {contracts.map((contract) => (
-                <tr
-                  key={contract.id}
-                  className={contract.id === selectedContractId ? "table-row-active" : ""}
-                  onClick={() => loadContractDetail(contract.id)}
-                >
-                  <td className="mono-small">{contract.id}</td>
-                  <td>{contract.name}</td>
-                  <td>{contract.latest_version ?? "-"}</td>
-                  <td>{contract.versions_count}</td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
+          <SmartTable
+            columns={[
+              { key: "id", label: "ID", sortable: true, searchable: true, render: (v) => <span className="mono-small">{String(v ?? "")}</span> },
+              { key: "name", label: locale === "ru" ? "Название" : "Name", sortable: true, searchable: true },
+              { key: "latest_version", label: locale === "ru" ? "Последняя версия" : "Latest Version", render: (v) => String(v ?? "-") },
+              { key: "versions_count", label: locale === "ru" ? "Версий" : "Versions", sortable: true },
+            ] as SmartColumn<Record<string, unknown>>[]}
+            data={contracts as Record<string, unknown>[]}
+            pageSize={20}
+            searchable
+            rowKeyField="id"
+            selectedKey={selectedContractId ?? undefined}
+            onRowClick={(row) => loadContractDetail(String(row.id))}
+          />
         </Card>
       ) : null}
 
@@ -172,30 +162,19 @@ export default function ContractsPage() {
         >
           <div className="panel stack">
             <h4>{locale === "ru" ? "История версий" : "Version History"}</h4>
-            <DataTable>
-              <thead>
-                <tr>
-                  <th>{locale === "ru" ? "Версия" : "Version"}</th>
-                  <th>{locale === "ru" ? "Дата" : "Date"}</th>
-                  <th>{locale === "ru" ? "Изменил" : "Changed By"}</th>
-                  <th>{locale === "ru" ? "Изменения" : "Changelog"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedContract.versions.map((version) => (
-                  <tr
-                    key={version.version}
-                    className={selectedVersion?.version === version.version ? "table-row-active" : ""}
-                    onClick={() => loadVersion(selectedContract.id, version.version)}
-                  >
-                    <td className="mono-small">{version.version}</td>
-                    <td>{formatDate(version.created_at, localeTag)}</td>
-                    <td>{version.changed_by ?? "-"}</td>
-                    <td>{version.changelog ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </DataTable>
+            <SmartTable
+              columns={[
+                { key: "version", label: locale === "ru" ? "Версия" : "Version", sortable: true, render: (v) => <span className="mono-small">{String(v ?? "")}</span> },
+                { key: "created_at", label: locale === "ru" ? "Дата" : "Date", sortable: true, render: (v) => formatDate(v as string, localeTag) },
+                { key: "changed_by", label: locale === "ru" ? "Изменил" : "Changed By", render: (v) => String(v ?? "-") },
+                { key: "changelog", label: locale === "ru" ? "Изменения" : "Changelog", render: (v) => String(v ?? "-") },
+              ] as SmartColumn<Record<string, unknown>>[]}
+              data={selectedContract.versions as Record<string, unknown>[]}
+              pageSize={10}
+              rowKeyField="version"
+              selectedKey={selectedVersion?.version ?? undefined}
+              onRowClick={(row) => loadVersion(selectedContract.id, String(row.version))}
+            />
           </div>
         </Card>
       ) : null}
@@ -216,24 +195,21 @@ export default function ContractsPage() {
                   {profile.required_columns.join(", ") || "-"}
                 </p>
                 <p className="muted">{locale === "ru" ? "Типы данных" : "Data types"}</p>
-                <DataTable>
-                  <thead>
-                    <tr>
-                      <th>{locale === "ru" ? "Колонка" : "Column"}</th>
-                      <th>{locale === "ru" ? "Тип" : "Type"}</th>
-                      <th>{locale === "ru" ? "Алиасы" : "Aliases"}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {Object.keys(profile.dtypes).map((column) => (
-                      <tr key={`${profileName}-${column}`}>
-                        <td className="mono-small">{column}</td>
-                        <td>{profile.dtypes[column]}</td>
-                        <td>{(profile.aliases[column] ?? []).join(", ") || "-"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </DataTable>
+                <SmartTable
+                  columns={[
+                    { key: "column", label: locale === "ru" ? "Колонка" : "Column", sortable: true, searchable: true, render: (v) => <span className="mono-small">{String(v ?? "")}</span> },
+                    { key: "dtype", label: locale === "ru" ? "Тип" : "Type", sortable: true },
+                    { key: "aliases", label: locale === "ru" ? "Алиасы" : "Aliases" },
+                  ] as SmartColumn<Record<string, unknown>>[]}
+                  data={Object.keys(profile.dtypes).map((col) => ({
+                    column: col,
+                    dtype: profile.dtypes[col],
+                    aliases: (profile.aliases[col] ?? []).join(", ") || "-",
+                  }))}
+                  pageSize={20}
+                  searchable
+                  rowKey={(_, i) => `${profileName}-${i}`}
+                />
               </div>
             ))}
           </div>

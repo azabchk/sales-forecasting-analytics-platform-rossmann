@@ -1,17 +1,14 @@
 import React from "react";
 
 import { extractApiError } from "../api/client";
-import {
-  fetchStores,
-  postScenarioRunV2,
-  ScenarioRunResponseV2,
-  Store,
-} from "../api/endpoints";
+import { ScenarioRunResponseV2 } from "../api/endpoints";
 import ScenarioChart from "../components/ScenarioChart";
 import PageLayout from "../components/layout/PageLayout";
 import Card from "../components/ui/Card";
 import MetricCard from "../components/ui/MetricCard";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
+import { useScenarioRun, useStores } from "../hooks/useApiQuery";
+import { useToast } from "../components/ui/Toast";
 import { formatDecimal, formatInt, formatPercent } from "../lib/format";
 import { useI18n } from "../lib/i18n";
 
@@ -19,14 +16,12 @@ type ScenarioMode = "store" | "segment";
 
 export default function ScenarioLab() {
   const { locale, localeTag } = useI18n();
-  const [stores, setStores] = React.useState<Store[]>([]);
+  const { success, error: toastError } = useToast();
   const [mode, setMode] = React.useState<ScenarioMode>("store");
   const [storeId, setStoreId] = React.useState<number | undefined>(undefined);
-
   const [segmentStoreType, setSegmentStoreType] = React.useState("");
   const [segmentAssortment, setSegmentAssortment] = React.useState("");
   const [segmentPromo2, setSegmentPromo2] = React.useState<"" | "0" | "1">("");
-
   const [horizon, setHorizon] = React.useState(30);
   const [promoMode, setPromoMode] = React.useState<"as_is" | "always_on" | "weekends_only" | "off">("as_is");
   const [weekendOpen, setWeekendOpen] = React.useState(true);
@@ -34,85 +29,60 @@ export default function ScenarioLab() {
   const [priceChangePct, setPriceChangePct] = React.useState(0);
   const [demandShiftPct, setDemandShiftPct] = React.useState(0);
   const [confidenceLevel, setConfidenceLevel] = React.useState(0.8);
-
-  const [loading, setLoading] = React.useState(false);
-  const [error, setError] = React.useState("");
   const [lastUpdated, setLastUpdated] = React.useState("-");
   const [result, setResult] = React.useState<ScenarioRunResponseV2 | null>(null);
 
+  const storesQ = useStores();
+
   React.useEffect(() => {
-    fetchStores()
-      .then((rows) => {
-        setStores(rows);
-        if (!storeId && rows.length > 0) {
-          setStoreId(rows[0].store_id);
-        }
-      })
-      .catch((errorResponse) => {
-        setError(
-          extractApiError(
-            errorResponse,
-            locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list."
-          )
-        );
-      });
-  }, [locale, storeId]);
+    if (!storeId && storesQ.data?.length) setStoreId(storesQ.data[0].store_id);
+  }, [storesQ.data, storeId]);
 
-  async function runScenario() {
-    if (mode === "store" && !storeId) {
-      setError(locale === "ru" ? "Выберите магазин." : "Select a store.");
-      return;
-    }
-
-    if (mode === "segment" && !segmentStoreType && !segmentAssortment && segmentPromo2 === "") {
-      setError(
-        locale === "ru"
-          ? "Укажите хотя бы один фильтр сегмента."
-          : "Provide at least one segment filter."
-      );
-      return;
-    }
-
-    setError("");
-    setLoading(true);
-
-    try {
-      const response = await postScenarioRunV2({
-        ...(mode === "store" ? { store_id: storeId } : {}),
-        ...(mode === "segment"
-          ? {
-              segment: {
-                ...(segmentStoreType ? { store_type: segmentStoreType } : {}),
-                ...(segmentAssortment ? { assortment: segmentAssortment } : {}),
-                ...(segmentPromo2 === "" ? {} : { promo2: Number(segmentPromo2) as 0 | 1 }),
-              },
-            }
-          : {}),
-        horizon_days: horizon,
-        promo_mode: promoMode,
-        weekend_open: weekendOpen,
-        school_holiday: schoolHoliday,
-        price_change_pct: priceChangePct,
-        demand_shift_pct: demandShiftPct,
-        confidence_level: confidenceLevel,
-      });
-
+  const scenarioMutation = useScenarioRun({
+    onSuccess: (response) => {
       setResult(response);
       setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
-    } catch (errorResponse) {
-      setError(
-        extractApiError(
-          errorResponse,
-          locale === "ru"
-            ? "Ошибка расчета сценария. Проверьте параметры и backend."
-            : "Scenario run failed. Verify request parameters and backend service."
-        )
-      );
-    } finally {
-      setLoading(false);
+      success(locale === "ru" ? "Сценарий готов!" : "Scenario ready!");
+    },
+    onError: (err) => {
+      toastError(extractApiError(err, locale === "ru" ? "Не удалось выполнить сценарий." : "Failed to run scenario."));
+    },
+  });
+
+  function runScenario() {
+    if (mode === "store" && !storeId) {
+      toastError(locale === "ru" ? "Выберите магазин." : "Select a store.");
+      return;
+    }
+    if (mode === "segment" && !segmentStoreType && !segmentAssortment && segmentPromo2 === "") {
+      toastError(locale === "ru" ? "Укажите хотя бы один фильтр сегмента." : "Provide at least one segment filter.");
+      return;
+    }
+
+    scenarioMutation.mutate({
+      ...(mode === "store" ? { store_id: storeId } : {}),
+      ...(mode === "segment" ? {
+        segment: {
+          ...(segmentStoreType ? { store_type: segmentStoreType } : {}),
+          ...(segmentAssortment ? { assortment: segmentAssortment } : {}),
+          ...(segmentPromo2 === "" ? {} : { promo2: Number(segmentPromo2) as 0 | 1 }),
+        },
+      } : {}),
+      horizon_days: horizon,
+      promo_mode: promoMode,
+      weekend_open: weekendOpen,
+      school_holiday: schoolHoliday,
+      price_change_pct: priceChangePct,
+      demand_shift_pct: demandShiftPct,
+      confidence_level: confidenceLevel,
+    });
+
+    // NOTE: old block below kept for compatibility — will be dead code
+    if (false) {
     }
   }
 
+  const loading = scenarioMutation.isPending;
   const summary = result?.summary;
 
   return (
@@ -129,7 +99,7 @@ export default function ScenarioLab() {
         </p>
       }
     >
-      {error ? <ErrorState message={error} /> : null}
+      {scenarioMutation.error ? <ErrorState message={extractApiError(scenarioMutation.error, "Scenario failed")} onRetry={runScenario} /> : null}
 
       <Card
         title={locale === "ru" ? "Параметры сценария" : "Scenario Inputs"}
@@ -158,7 +128,7 @@ export default function ScenarioLab() {
                 value={storeId ?? ""}
                 onChange={(event) => setStoreId(Number(event.target.value))}
               >
-                {stores.map((store) => (
+                {(storesQ.data ?? []).map((store) => (
                   <option key={store.store_id} value={store.store_id}>
                     #{store.store_id} · {store.store_type || "-"}
                   </option>

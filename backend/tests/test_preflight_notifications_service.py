@@ -280,6 +280,76 @@ def test_hmac_signature_is_deterministic_for_same_payload_and_timestamp():
     )
 
 
+def test_webhook_private_target_is_blocked_by_default(monkeypatch):
+    monkeypatch.delenv("PREFLIGHT_ALERTS_WEBHOOK_ALLOW_PRIVATE_TARGETS", raising=False)
+    channel = notification_service.NotificationChannel(
+        id="local_webhook",
+        channel_type="webhook",
+        enabled=True,
+        target_url="http://127.0.0.1:9000/hooks/alerts",
+        timeout_seconds=5,
+        max_attempts=3,
+        backoff_seconds=5,
+        signing_secret_env=None,
+        enabled_event_types=(EVENT_ALERT_FIRING,),
+    )
+    payload = {
+        "version": "v1",
+        "event_id": "evt_local_1",
+        "event_type": EVENT_ALERT_FIRING,
+        "delivery": {"delivery_id": "del_local_1"},
+    }
+
+    result = notification_service._send_webhook_request(channel, payload)
+    assert result.success is False
+    assert result.retryable is False
+    assert result.status_code is None
+    assert result.error_code == "TARGET_URL_BLOCKED"
+
+
+def test_webhook_private_target_can_be_enabled_explicitly(monkeypatch):
+    monkeypatch.setenv("PREFLIGHT_ALERTS_WEBHOOK_ALLOW_PRIVATE_TARGETS", "1")
+
+    class _Response:
+        status = 204
+
+        def getcode(self):
+            return self.status
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def _fake_urlopen(_request, timeout=None):  # noqa: ANN001
+        return _Response()
+
+    monkeypatch.setattr(notification_service.urllib.request, "urlopen", _fake_urlopen)
+
+    channel = notification_service.NotificationChannel(
+        id="local_webhook",
+        channel_type="webhook",
+        enabled=True,
+        target_url="http://127.0.0.1:9000/hooks/alerts",
+        timeout_seconds=5,
+        max_attempts=3,
+        backoff_seconds=5,
+        signing_secret_env=None,
+        enabled_event_types=(EVENT_ALERT_FIRING,),
+    )
+    payload = {
+        "version": "v1",
+        "event_id": "evt_local_2",
+        "event_type": EVENT_ALERT_FIRING,
+        "delivery": {"delivery_id": "del_local_2"},
+    }
+
+    result = notification_service._send_webhook_request(channel, payload)
+    assert result.success is True
+    assert result.status_code == 204
+
+
 def test_replay_clones_delivery_with_same_event_id_and_new_delivery_id(monkeypatch, tmp_path: Path):
     channels_path = _configure_env(monkeypatch, tmp_path)
     _write_channels(channels_path)

@@ -10,6 +10,10 @@ router = APIRouter()
 
 @router.post("/scenario/run", response_model=ScenarioRunResponseV2)
 def run_scenario(payload: ScenarioRunRequestV2) -> ScenarioRunResponseV2:
+    if payload.store_id is not None and payload.segment is not None:
+        raise HTTPException(status_code=400, detail="Use either store_id or segment, not both")
+    if payload.store_id is None and payload.segment is None:
+        raise HTTPException(status_code=400, detail="Either store_id or segment is required")
     try:
         response = run_scenario_v2(
             store_id=payload.store_id,

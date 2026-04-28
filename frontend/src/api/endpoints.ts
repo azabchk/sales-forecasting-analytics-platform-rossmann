@@ -175,6 +175,35 @@ export type ChatResponse = {
   answer: string;
   insights: ChatInsight[];
   suggestions: string[];
+  detected_intent?: string | null;
+  confidence_score?: number | null;
+};
+
+export type StoreListResponse = {
+  items: Store[];
+  total: number;
+  page: number;
+  page_size: number;
+};
+
+export type StoreComparisonMetrics = {
+  store_id: number;
+  store_type?: string | null;
+  assortment?: string | null;
+  competition_distance?: number | null;
+  total_sales: number;
+  avg_daily_sales: number;
+  total_customers: number;
+  avg_daily_customers: number;
+  promo_days: number;
+  open_days: number;
+  promo_uplift_pct?: number | null;
+};
+
+export type StoreComparisonResponse = {
+  date_from: string;
+  date_to: string;
+  stores: StoreComparisonMetrics[];
 };
 
 export type PreflightSourceName = "train" | "store";
@@ -476,8 +505,41 @@ export type PreflightAnalyticsQueryParams = {
   days?: number;
 };
 
+/** Paginated store list — use for browsing/search. */
+export async function fetchStoresPaginated(params?: {
+  page?: number;
+  page_size?: number;
+  store_type?: string;
+  assortment?: string;
+}): Promise<StoreListResponse> {
+  const { data } = await apiClient.get<StoreListResponse>('/stores', { params: params ?? {} });
+  return data;
+}
+
+/** Fetch all stores across pages — use for dropdowns/selectors. */
 export async function fetchStores(): Promise<Store[]> {
-  const { data } = await apiClient.get<Store[]>('/stores');
+  const pageSize = 500;
+  const first = await fetchStoresPaginated({ page: 1, page_size: pageSize });
+  const items: Store[] = [...first.items];
+  const totalPages = Math.ceil(first.total / pageSize);
+  for (let p = 2; p <= totalPages; p++) {
+    const page = await fetchStoresPaginated({ page: p, page_size: pageSize });
+    items.push(...page.items);
+  }
+  return items;
+}
+
+export async function fetchStoreDetail(store_id: number): Promise<Store> {
+  const { data } = await apiClient.get<Store>(`/stores/${store_id}`);
+  return data;
+}
+
+export async function fetchStoreComparison(params: {
+  store_ids: string;
+  date_from: string;
+  date_to: string;
+}): Promise<StoreComparisonResponse> {
+  const { data } = await apiClient.get<StoreComparisonResponse>('/stores/comparison', { params });
   return data;
 }
 

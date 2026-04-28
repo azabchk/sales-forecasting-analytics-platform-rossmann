@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,11 +27,17 @@ from src.etl.forecast_run_registry import upsert_forecast_run
 
 settings = get_settings()
 
+# ── In-memory model artifact cache (invalidates on file mtime change) ─────────
 _ARTIFACT_CACHE: dict[str, object] = {
     "path": None,
     "mtime": None,
     "payload": None,
 }
+
+# ── Short-lived forecast cache (keyed by (store_id, horizon, date)) ──────────
+# LRU OrderedDict: most-recently-used at the end; evicts from the front at 500 entries.
+_FORECAST_CACHE: OrderedDict[tuple, tuple[datetime, list[dict]]] = OrderedDict()
+_FORECAST_CACHE_TTL_SECONDS = 300  # 5-minute TTL
 
 
 @dataclass(frozen=True)
@@ -77,13 +85,17 @@ def _validate_store_ids(store_ids: list[int]) -> list[int]:
             continue
         seen.add(raw)
         unique_store_ids.append(raw)
-
     if len(unique_store_ids) > 50:
         raise ValueError("store_ids cannot contain more than 50 stores")
     return unique_store_ids
 
 
-def _fetch_history(engine_ref: sa.Engine, store_id: int, history_days: int = 90) -> pd.DataFrame:
+def _fetch_history(engine_ref: sa.Engine, store_id: int, history_days: int = 400) -> pd.DataFrame:
+    """
+    Fetch the last `history_days` rows for a store.
+    400 days (default) is required so lag_364 (yearly seasonality feature)
+    is available from the very first forecast step.
+    """
     query = sa.text(
         """
         SELECT
@@ -126,6 +138,8 @@ def _fetch_store_meta(engine_ref: sa.Engine, store_id: int) -> pd.Series:
     return df.iloc[0]
 
 
+# ── History helper utilities ──────────────────────────────────────────────────
+
 def _safe_lag(values: list[float], offset: int) -> float:
     if len(values) >= offset:
         return float(values[-offset])
@@ -135,16 +149,24 @@ def _safe_lag(values: list[float], offset: int) -> float:
 def _safe_mean(values: list[float], window: int) -> float:
     if not values:
         return 0.0
-    slice_values = values[-window:] if len(values) >= window else values
-    return float(np.mean(slice_values))
+    return float(np.mean(values[-window:] if len(values) >= window else values))
 
 
 def _safe_std(values: list[float], window: int) -> float:
     if len(values) < 2:
         return 0.0
-    slice_values = values[-window:] if len(values) >= window else values
-    return float(np.std(slice_values, ddof=0))
+    slice_v = values[-window:] if len(values) >= window else values
+    return float(np.std(slice_v, ddof=0))
 
+
+def _safe_density(values: list[float], window: int) -> float:
+    """Rolling mean over last `window` promo flags (0/1)."""
+    if not values:
+        return 0.0
+    return float(np.mean(values[-window:] if len(values) >= window else values))
+
+
+# ── Feature construction helpers ──────────────────────────────────────────────
 
 def _resolve_promo_value(promo_mode: str, day_of_week: int) -> int:
     if promo_mode == "always_on":
@@ -169,38 +191,70 @@ def _build_feature_row(
     store_id: int,
     forecast_date: pd.Timestamp,
     sales_history: list[float],
+    promo_history: list[float],
     store_meta: pd.Series,
     base_days_since_start: int,
     step: int,
     controls: ForecastControls,
 ) -> dict:
-    rolling_7 = _safe_mean(sales_history, 7)
+    """
+    Build a single feature row for one forecast step.
+    Must stay in sync with ml/features.py FEATURE_COLS.
+    """
     day_of_week = int(forecast_date.dayofweek + 1)
+    rolling_7 = _safe_mean(sales_history, 7)
+    rolling_28 = _safe_mean(sales_history, 28)
+    competition_distance = float(store_meta["competition_distance"])
 
     return {
+        # Store identifier
         "store_id": int(store_id),
+        # Demand drivers
         "promo": _resolve_promo_value(controls.promo_mode, day_of_week),
         "school_holiday": int(controls.school_holiday),
         "open": _resolve_open_value(day_of_week, controls.weekend_open),
-        "competition_distance": float(store_meta["competition_distance"]),
+        # Store metadata
+        "competition_distance": competition_distance,
+        "competition_distance_log": float(np.log1p(competition_distance)),  # NEW
         "promo2": int(store_meta["promo2"]),
+        # Calendar — basic
         "day_of_week": day_of_week,
         "month": int(forecast_date.month),
         "quarter": int((forecast_date.month - 1) // 3 + 1),
         "week_of_year": int(forecast_date.isocalendar().week),
         "is_weekend": int(day_of_week in [6, 7]),
+        "day_of_month": int(forecast_date.day),                             # NEW
+        "is_month_start": int(forecast_date.day <= 3),                      # NEW
+        "is_month_end": int(forecast_date.day >= 28),                       # NEW
         "days_since_start": int(base_days_since_start + step),
+        # Lag features (expanded)
         "lag_1": _safe_lag(sales_history, 1),
+        "lag_3": _safe_lag(sales_history, 3),                               # NEW
         "lag_7": _safe_lag(sales_history, 7),
         "lag_14": _safe_lag(sales_history, 14),
+        "lag_21": _safe_lag(sales_history, 21),                             # NEW
         "lag_28": _safe_lag(sales_history, 28),
+        "lag_364": _safe_lag(sales_history, 364) if len(sales_history) >= 364  # NEW
+                   else rolling_28,  # fallback if history < 1yr
+        # Rolling statistics (expanded)
         "rolling_mean_7": rolling_7,
         "rolling_mean_14": _safe_mean(sales_history, 14),
-        "rolling_mean_28": _safe_mean(sales_history, 28),
+        "rolling_mean_28": rolling_28,
+        "rolling_mean_56": _safe_mean(sales_history, 56),                   # NEW
         "rolling_std_7": _safe_std(sales_history, 7),
         "rolling_std_14": _safe_std(sales_history, 14),
         "rolling_std_28": _safe_std(sales_history, 28),
-        "lag_1_to_mean_7_ratio": _safe_lag(sales_history, 1) / rolling_7 if rolling_7 > 0 else 1.0,
+        "rolling_std_56": _safe_std(sales_history, 56),                     # NEW
+        # Derived ratios & trends
+        "lag_1_to_mean_7_ratio": (_safe_lag(sales_history, 1) / rolling_7) if rolling_7 > 0 else 1.0,
+        "sales_velocity": (rolling_7 / rolling_28) if rolling_28 > 0 else 1.0,          # NEW
+        "lag_364_to_mean_28_ratio": (_safe_lag(sales_history, 364) / rolling_28)         # NEW
+                                    if len(sales_history) >= 364 and rolling_28 > 0
+                                    else 1.0,
+        # Promo density (NEW)
+        "promo_density_7": _safe_density(promo_history, 7),
+        "promo_density_14": _safe_density(promo_history, 14),
+        # Categoricals (one-hot encoded downstream)
         "state_holiday": "0",
         "store_type": str(store_meta["store_type"]),
         "assortment": str(store_meta["assortment"]),
@@ -227,6 +281,16 @@ def _postprocess_prediction(prediction: float, floor: float, cap: float | None) 
     return float(pred)
 
 
+def _horizon_sigma(base_sigma: float, step: int) -> float:
+    """
+    Scale prediction uncertainty with forecast horizon.
+    Uses linear growth (+3% per day) capped at 90 days to avoid
+    unbounded widening on long horizons.
+    """
+    growth = 1.0 + 0.03 * min(step - 1, 89)
+    return base_sigma * growth
+
+
 def _run_recursive_forecast(
     *,
     model,
@@ -242,7 +306,12 @@ def _run_recursive_forecast(
     store_meta: pd.Series,
     controls: ForecastControls,
 ) -> list[dict]:
-    sales_history = history["sales"].astype(float).tolist()
+    sales_history: list[float] = history["sales"].astype(float).tolist()
+    promo_history: list[float] = (
+        history["promo"].astype(float).tolist()
+        if "promo" in history.columns
+        else [0.0] * len(sales_history)
+    )
     last_date = history["full_date"].max()
     base_days_since_start = len(sales_history) - 1
     z_score = _resolve_confidence_z(controls.confidence_level)
@@ -250,10 +319,14 @@ def _run_recursive_forecast(
     output: list[dict] = []
     for step in range(1, horizon_days + 1):
         forecast_date = last_date + pd.Timedelta(days=step)
+        day_of_week = int(forecast_date.dayofweek + 1)
+        promo_value = _resolve_promo_value(controls.promo_mode, day_of_week)
+
         row = _build_feature_row(
             store_id=store_id,
             forecast_date=forecast_date,
             sales_history=sales_history,
+            promo_history=promo_history,
             store_meta=store_meta,
             base_days_since_start=base_days_since_start,
             step=step,
@@ -266,10 +339,14 @@ def _run_recursive_forecast(
         pred = pred * (1.0 + controls.demand_shift_pct / 100.0)
         pred = _postprocess_prediction(pred, floor, cap)
 
-        lower = _postprocess_prediction(pred - z_score * sigma, floor, cap)
-        upper = _postprocess_prediction(pred + z_score * sigma, floor, cap)
+        # Horizon-dependent uncertainty — bands widen with forecast distance
+        step_sigma = _horizon_sigma(sigma, step)
+        lower = _postprocess_prediction(pred - z_score * step_sigma, floor, cap)
+        upper = _postprocess_prediction(pred + z_score * step_sigma, floor, cap)
 
         sales_history.append(pred)
+        promo_history.append(float(promo_value))  # track future promo for promo_density
+
         output.append(
             {
                 "date": forecast_date.date(),
@@ -302,8 +379,20 @@ def _load_artifact() -> dict:
     return payload
 
 
+class _EnsembleWrapper:
+    """Averages predictions from a dict of {name: model} sub-models."""
+    def __init__(self, models: dict) -> None:
+        self._models = models
+
+    def predict(self, x: Any) -> np.ndarray:
+        preds = [np.asarray(m.predict(x), dtype=float) for m in self._models.values()]
+        return np.mean(preds, axis=0)
+
+
 def _extract_artifact_parts(artifact: dict) -> tuple:
-    model = artifact["model"]
+    raw_model = artifact["model"]
+    # Ensemble artifacts store a dict of sub-models
+    model = _EnsembleWrapper(raw_model) if isinstance(raw_model, dict) else raw_model
     categorical_columns = artifact["categorical_columns"]
     feature_columns = artifact["feature_columns"]
     target_transform = str(artifact.get("target_transform", "none"))
@@ -344,6 +433,31 @@ def _record_forecast_run(
     )
 
 
+def _forecast_cache_get(key: tuple) -> list[dict] | None:
+    """Return cached forecast if within TTL, else None. Moves hit to MRU position."""
+    entry = _FORECAST_CACHE.get(key)
+    if entry is None:
+        return None
+    cached_at, result = entry
+    age = (datetime.now(timezone.utc) - cached_at).total_seconds()
+    if age > _FORECAST_CACHE_TTL_SECONDS:
+        _FORECAST_CACHE.pop(key, None)
+        return None
+    _FORECAST_CACHE.move_to_end(key)
+    return result
+
+
+def _forecast_cache_set(key: tuple, result: list[dict]) -> None:
+    """Insert or refresh entry; evict LRU entries beyond 500-item cap."""
+    if key in _FORECAST_CACHE:
+        _FORECAST_CACHE.move_to_end(key)
+    _FORECAST_CACHE[key] = (datetime.now(timezone.utc), result)
+    while len(_FORECAST_CACHE) > 500:
+        _FORECAST_CACHE.popitem(last=False)  # evict least-recently-used
+
+
+# ── Public service functions ──────────────────────────────────────────────────
+
 def forecast_for_store(
     store_id: int,
     horizon_days: int,
@@ -378,24 +492,31 @@ def forecast_for_store(
         artifact = _load_artifact()
         model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
 
-        history = _fetch_history(engine, store_id=store_id, history_days=90)
-        store_meta = _fetch_store_meta(engine, store_id=store_id)
+        # Check short-lived cache (avoids repeated DB + recursive computation)
+        cache_key = (store_id, horizon_days, started_at.date().isoformat())
+        cached = _forecast_cache_get(cache_key)
 
-        baseline_controls = ForecastControls()
-        result = _run_recursive_forecast(
-            model=model,
-            categorical_columns=categorical_columns,
-            feature_columns=feature_columns,
-            target_transform=target_transform,
-            floor=floor,
-            cap=cap,
-            sigma=sigma,
-            store_id=store_id,
-            horizon_days=horizon_days,
-            history=history,
-            store_meta=store_meta,
-            controls=baseline_controls,
-        )
+        if cached is not None:
+            result = cached
+        else:
+            history = _fetch_history(engine, store_id=store_id, history_days=400)
+            store_meta = _fetch_store_meta(engine, store_id=store_id)
+            result = _run_recursive_forecast(
+                model=model,
+                categorical_columns=categorical_columns,
+                feature_columns=feature_columns,
+                target_transform=target_transform,
+                floor=floor,
+                cap=cap,
+                sigma=sigma,
+                store_id=store_id,
+                horizon_days=horizon_days,
+                history=history,
+                store_meta=store_meta,
+                controls=ForecastControls(),
+            )
+            _forecast_cache_set(cache_key, result)
+
         if _record_run and run_id is not None:
             _record_forecast_run(
                 run_id=run_id,
@@ -430,14 +551,12 @@ def forecast_for_store(
 def _summarize_store_series(store_id: int, points: list[dict]) -> dict:
     total = float(sum(float(item["predicted_sales"]) for item in points))
     avg = float(total / len(points)) if points else 0.0
-
     peak_point = max(points, key=lambda item: float(item["predicted_sales"])) if points else None
     interval_widths = [
         float(item["predicted_upper"]) - float(item["predicted_lower"])
         for item in points
         if item.get("predicted_upper") is not None and item.get("predicted_lower") is not None
     ]
-
     return {
         "store_id": store_id,
         "total_predicted_sales": total,
@@ -484,26 +603,23 @@ def forecast_batch_for_stores(
                 _record_run=False,
             )
 
-        store_summaries = [_summarize_store_series(store_id, points) for store_id, points in store_series.items()]
+        store_summaries = [_summarize_store_series(sid, pts) for sid, pts in store_series.items()]
 
         portfolio_series: list[dict] = []
         for index in range(horizon_days):
             date_value = next(iter(store_series.values()))[index]["date"]
-            predicted_sales = float(sum(points[index]["predicted_sales"] for points in store_series.values()))
-            predicted_lower = float(sum(points[index]["predicted_lower"] for points in store_series.values()))
-            predicted_upper = float(sum(points[index]["predicted_upper"] for points in store_series.values()))
             portfolio_series.append(
                 {
                     "date": date_value,
-                    "predicted_sales": predicted_sales,
-                    "predicted_lower": predicted_lower,
-                    "predicted_upper": predicted_upper,
+                    "predicted_sales": float(sum(pts[index]["predicted_sales"] for pts in store_series.values())),
+                    "predicted_lower": float(sum(pts[index]["predicted_lower"] for pts in store_series.values())),
+                    "predicted_upper": float(sum(pts[index]["predicted_upper"] for pts in store_series.values())),
                 }
             )
 
         portfolio_total = float(sum(row["predicted_sales"] for row in portfolio_series))
         portfolio_avg_daily = float(portfolio_total / horizon_days) if horizon_days > 0 else 0.0
-        portfolio_peak_point = max(portfolio_series, key=lambda row: row["predicted_sales"]) if portfolio_series else None
+        portfolio_peak = max(portfolio_series, key=lambda r: r["predicted_sales"]) if portfolio_series else None
         interval_widths = [
             row["predicted_upper"] - row["predicted_lower"]
             for row in portfolio_series
@@ -518,8 +634,8 @@ def forecast_batch_for_stores(
                 "horizon_days": horizon_days,
                 "total_predicted_sales": portfolio_total,
                 "avg_daily_sales": portfolio_avg_daily,
-                "peak_date": portfolio_peak_point["date"] if portfolio_peak_point else None,
-                "peak_sales": float(portfolio_peak_point["predicted_sales"]) if portfolio_peak_point else 0.0,
+                "peak_date": portfolio_peak["date"] if portfolio_peak else None,
+                "peak_sales": float(portfolio_peak["predicted_sales"]) if portfolio_peak else 0.0,
                 "avg_interval_width": float(np.mean(interval_widths)) if interval_widths else 0.0,
             },
             "portfolio_series": portfolio_series,
@@ -598,7 +714,7 @@ def forecast_scenario_for_store(
         artifact = _load_artifact()
         model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
 
-        history = _fetch_history(engine, store_id=store_id, history_days=90)
+        history = _fetch_history(engine, store_id=store_id, history_days=400)
         store_meta = _fetch_store_meta(engine, store_id=store_id)
 
         baseline = _run_recursive_forecast(
@@ -652,13 +768,12 @@ def forecast_scenario_for_store(
                 }
             )
 
-        total_baseline = float(sum(row["baseline_sales"] for row in points))
-        total_scenario = float(sum(row["scenario_sales"] for row in points))
+        total_baseline = float(sum(r["baseline_sales"] for r in points))
+        total_scenario = float(sum(r["scenario_sales"] for r in points))
         total_delta = float(total_scenario - total_baseline)
         uplift_pct = float((total_delta / total_baseline) * 100.0) if total_baseline > 0 else 0.0
         avg_daily_delta = float(total_delta / horizon_days) if horizon_days > 0 else 0.0
-
-        max_delta_point = max(points, key=lambda row: row["delta_sales"]) if points else None
+        max_delta_point = max(points, key=lambda r: r["delta_sales"]) if points else None
 
         response = {
             "request": {

@@ -1,14 +1,25 @@
 ﻿import logging
+import os
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+
+# Load .env before any ETL/registry modules so os.getenv("DATABASE_URL") resolves.
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 
 from app.config import get_settings
 from app.routers import (
+    auth,
     chat,
     contracts,
     data_sources,
@@ -22,9 +33,13 @@ from app.routers import (
     stores,
     system,
 )
+from app.security.jwt import get_current_user
 from app.services.preflight_alerts_scheduler import PreflightAlertsScheduler
 
 settings = get_settings()
+
+# ── Rate limiter (in-memory, keyed by client IP) ──────────────────────────────
+limiter = Limiter(key_func=get_remote_address, default_limits=["200/minute"])
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,6 +69,10 @@ app = FastAPI(
     version="2.0.0",
     lifespan=app_lifespan,
 )
+
+# Attach rate limiter state and handler
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
     CORSMiddleware,
@@ -97,15 +116,21 @@ async def observability_middleware(request: Request, call_next):
     )
     return response
 
+_protected = [Depends(get_current_user)]
+
+# Public — no auth required
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
-app.include_router(stores.router, prefix="/api/v1", tags=["stores"])
-app.include_router(kpi.router, prefix="/api/v1", tags=["kpi"])
-app.include_router(sales.router, prefix="/api/v1", tags=["sales"])
-app.include_router(forecast.router, prefix="/api/v1", tags=["forecast"])
-app.include_router(scenario.router, prefix="/api/v1", tags=["scenario"])
-app.include_router(system.router, prefix="/api/v1", tags=["system"])
-app.include_router(data_sources.router, prefix="/api/v1", tags=["data_sources"])
-app.include_router(contracts.router, prefix="/api/v1", tags=["contracts"])
-app.include_router(ml.router, prefix="/api/v1", tags=["ml"])
-app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
-app.include_router(diagnostics.router, prefix="/api/v1", tags=["diagnostics"])
+app.include_router(auth.router,   prefix="/api/v1", tags=["auth"])
+
+# Protected — valid JWT required
+app.include_router(stores.router,       prefix="/api/v1", tags=["stores"],       dependencies=_protected)
+app.include_router(kpi.router,          prefix="/api/v1", tags=["kpi"],          dependencies=_protected)
+app.include_router(sales.router,        prefix="/api/v1", tags=["sales"],        dependencies=_protected)
+app.include_router(forecast.router,     prefix="/api/v1", tags=["forecast"],     dependencies=_protected)
+app.include_router(scenario.router,     prefix="/api/v1", tags=["scenario"],     dependencies=_protected)
+app.include_router(system.router,       prefix="/api/v1", tags=["system"],       dependencies=_protected)
+app.include_router(data_sources.router, prefix="/api/v1", tags=["data_sources"], dependencies=_protected)
+app.include_router(contracts.router,    prefix="/api/v1", tags=["contracts"],    dependencies=_protected)
+app.include_router(ml.router,           prefix="/api/v1", tags=["ml"],           dependencies=_protected)
+app.include_router(chat.router,         prefix="/api/v1", tags=["chat"],         dependencies=_protected)
+app.include_router(diagnostics.router,  prefix="/api/v1", tags=["diagnostics"],  dependencies=_protected)

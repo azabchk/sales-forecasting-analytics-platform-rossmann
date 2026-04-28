@@ -20,9 +20,9 @@ from src.etl.preflight_alert_registry import (  # noqa: E402
     get_scheduler_lease,
     list_active_alert_states,
 )
-from src.etl.preflight_notification_attempt_registry import query_delivery_attempts  # noqa: E402
-from src.etl.preflight_notification_outbox_registry import query_outbox_items  # noqa: E402
-from src.etl.preflight_registry import query_preflight_runs  # noqa: E402
+from src.etl.preflight_notification_attempt_registry import aggregate_delivery_attempt_metrics  # noqa: E402
+from src.etl.preflight_notification_outbox_registry import count_outbox_items, get_oldest_outbox_created_at  # noqa: E402
+from src.etl.preflight_registry import aggregate_preflight_run_metrics  # noqa: E402
 
 logger = logging.getLogger("preflight.metrics")
 
@@ -63,16 +63,6 @@ def _normalize_source(value: Any, fallback: str = "unknown") -> str:
     if text is None:
         return fallback
     return text.lower()
-
-
-def _coerce_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return value != 0
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "y", "t"}
-    return False
 
 
 def _parse_datetime(value: Any) -> datetime | None:
@@ -146,25 +136,24 @@ def _lease_last_tick_timestamp_seconds(lease_name: str) -> int:
 
 
 def _collect_preflight_lines() -> list[str]:
-    rows = query_preflight_runs(limit=None)
     runs_counter: defaultdict[tuple[str, str, str], int] = defaultdict(int)
     blocked_counter: defaultdict[str, int] = defaultdict(int)
     latest_by_source: dict[str, datetime] = {}
 
-    for row in rows:
+    aggregate_payload = aggregate_preflight_run_metrics()
+    for row in aggregate_payload.get("runs_by_source_status_mode", []):
         source_name = _normalize_source(row.get("source_name"))
         final_status = _normalize_status(row.get("final_status"))
         mode = _normalize_source(row.get("mode"), fallback="unknown")
-
-        runs_counter[(source_name, final_status, mode)] += 1
-        if _coerce_bool(row.get("blocked")):
-            blocked_counter[source_name] += 1
-
+        runs_counter[(source_name, final_status, mode)] += int(row.get("count", 0))
+    for row in aggregate_payload.get("blocked_by_source", []):
+        source_name = _normalize_source(row.get("source_name"))
+        blocked_counter[source_name] += int(row.get("count", 0))
+    for row in aggregate_payload.get("latest_by_source", []):
+        source_name = _normalize_source(row.get("source_name"))
         created_at = _parse_datetime(row.get("created_at"))
         if created_at is not None:
-            previous = latest_by_source.get(source_name)
-            if previous is None or created_at > previous:
-                latest_by_source[source_name] = created_at
+            latest_by_source[source_name] = created_at
 
     lines = [
         "# HELP preflight_runs_total Total persisted preflight runs grouped by source/final_status/mode.",
@@ -264,49 +253,32 @@ def _collect_alert_lines() -> list[str]:
 
 
 def _collect_notification_lines(*, now: datetime) -> list[str]:
-    attempt_rows = query_delivery_attempts(limit=None, descending=False)
-
     attempts_counter: defaultdict[tuple[str, str, str], int] = defaultdict(int)
-    delivery_latencies_ms: list[float] = []
-    dispatch_errors_total = 0
-
-    for row in attempt_rows:
+    attempt_metrics = aggregate_delivery_attempt_metrics(
+        latency_buckets_ms=_NOTIFICATION_LATENCY_BUCKETS_MS,
+    )
+    for row in attempt_metrics.get("grouped_counts", []):
         channel_target = _normalize_optional_text(row.get("channel_target")) or "unknown"
         event_type = _normalize_status(row.get("event_type"))
         attempt_status = _normalize_status(row.get("attempt_status"))
-        attempts_counter[(channel_target, event_type, attempt_status)] += 1
+        attempts_counter[(channel_target, event_type, attempt_status)] += int(row.get("count", 0))
 
-        duration_ms = row.get("duration_ms")
-        if duration_ms is not None:
-            try:
-                parsed_duration = float(duration_ms)
-            except (TypeError, ValueError):
-                parsed_duration = None
-            if parsed_duration is not None and parsed_duration >= 0:
-                delivery_latencies_ms.append(parsed_duration)
+    dispatch_errors_total = int(attempt_metrics.get("dispatch_errors_total", 0))
+    latency_sum_ms = float(attempt_metrics.get("latency_sum_ms", 0.0))
+    latency_count = int(attempt_metrics.get("latency_count", 0))
+    latency_bucket_counts = {
+        int(bucket): int(count)
+        for bucket, count in dict(attempt_metrics.get("latency_bucket_counts", {})).items()
+    }
 
-        if attempt_status in {"RETRY", "DEAD", "FAILED"}:
-            dispatch_errors_total += 1
-
-    pending_rows = query_outbox_items(statuses=("PENDING", "RETRYING"), limit=None, descending=False)
-    dead_rows = query_outbox_items(statuses=("DEAD",), limit=None, descending=False)
-    all_outbox_rows = query_outbox_items(limit=None, descending=False)
-
-    pending_count = len(pending_rows)
-    dead_count = len(dead_rows)
-    replay_count = sum(1 for row in all_outbox_rows if _normalize_optional_text(row.get("replayed_from_id")) is not None)
+    pending_count = count_outbox_items(statuses=("PENDING", "RETRYING"))
+    dead_count = count_outbox_items(statuses=("DEAD",))
+    replay_count = count_outbox_items(replayed_only=True)
 
     oldest_pending_age_seconds = 0
-    if pending_rows:
-        oldest_created_at: datetime | None = None
-        for row in pending_rows:
-            created_at = _parse_datetime(row.get("created_at"))
-            if created_at is None:
-                continue
-            if oldest_created_at is None or created_at < oldest_created_at:
-                oldest_created_at = created_at
-        if oldest_created_at is not None:
-            oldest_pending_age_seconds = max(0, int((now - oldest_created_at).total_seconds()))
+    oldest_created_at = get_oldest_outbox_created_at(statuses=("PENDING", "RETRYING"))
+    if oldest_created_at is not None:
+        oldest_pending_age_seconds = max(0, int((now - oldest_created_at).total_seconds()))
 
     lease_base = _get_scheduler_lease_base_name()
     notifications_tick_ts = _lease_last_tick_timestamp_seconds(f"{lease_base}:notifications")
@@ -335,11 +307,8 @@ def _collect_notification_lines(*, now: datetime) -> list[str]:
         ]
     )
 
-    sorted_latencies = sorted(delivery_latencies_ms)
-    cumulative = 0
     for bucket in _NOTIFICATION_LATENCY_BUCKETS_MS:
-        while cumulative < len(sorted_latencies) and sorted_latencies[cumulative] <= bucket:
-            cumulative += 1
+        cumulative = latency_bucket_counts.get(int(float(bucket)), 0)
         lines.append(
             _render_metric(
                 "preflight_notifications_delivery_latency_ms_bucket",
@@ -351,12 +320,12 @@ def _collect_notification_lines(*, now: datetime) -> list[str]:
     lines.append(
         _render_metric(
             "preflight_notifications_delivery_latency_ms_bucket",
-            len(sorted_latencies),
+            latency_count,
             {"le": "+Inf"},
         )
     )
-    lines.append(_render_metric("preflight_notifications_delivery_latency_ms_sum", sum(sorted_latencies)))
-    lines.append(_render_metric("preflight_notifications_delivery_latency_ms_count", len(sorted_latencies)))
+    lines.append(_render_metric("preflight_notifications_delivery_latency_ms_sum", latency_sum_ms))
+    lines.append(_render_metric("preflight_notifications_delivery_latency_ms_count", latency_count))
 
     lines.extend(
         [

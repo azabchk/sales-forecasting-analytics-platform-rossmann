@@ -199,6 +199,53 @@ def query_preflight_runs(
     return [_serialize_row(dict(row)) for row in rows]
 
 
+def aggregate_preflight_run_metrics(database_url: str | None = None) -> dict[str, Any]:
+    engine = _ensure_registry_table(database_url)
+
+    source_expr = sa.func.lower(sa.func.coalesce(_REGISTRY_TABLE.c.source_name, "unknown"))
+    status_expr = sa.func.upper(sa.func.coalesce(_REGISTRY_TABLE.c.final_status, "UNKNOWN"))
+    mode_expr = sa.func.lower(sa.func.coalesce(_REGISTRY_TABLE.c.mode, "unknown"))
+
+    grouped_query = (
+        sa.select(
+            source_expr.label("source_name"),
+            status_expr.label("final_status"),
+            mode_expr.label("mode"),
+            sa.func.count().label("count"),
+        )
+        .select_from(_REGISTRY_TABLE)
+        .group_by(source_expr, status_expr, mode_expr)
+    )
+    blocked_query = (
+        sa.select(
+            source_expr.label("source_name"),
+            sa.func.count().label("count"),
+        )
+        .select_from(_REGISTRY_TABLE)
+        .where(_REGISTRY_TABLE.c.blocked.is_(True))
+        .group_by(source_expr)
+    )
+    latest_query = (
+        sa.select(
+            source_expr.label("source_name"),
+            sa.func.max(_REGISTRY_TABLE.c.created_at).label("created_at"),
+        )
+        .select_from(_REGISTRY_TABLE)
+        .group_by(source_expr)
+    )
+
+    with engine.connect() as conn:
+        grouped_rows = conn.execute(grouped_query).mappings().all()
+        blocked_rows = conn.execute(blocked_query).mappings().all()
+        latest_rows = conn.execute(latest_query).mappings().all()
+
+    return {
+        "runs_by_source_status_mode": [_serialize_row(dict(row)) for row in grouped_rows],
+        "blocked_by_source": [_serialize_row(dict(row)) for row in blocked_rows],
+        "latest_by_source": [_serialize_row(dict(row)) for row in latest_rows],
+    }
+
+
 def get_preflight_run(run_id: str, database_url: str | None = None) -> dict[str, Any] | None:
     """Get all source records for a specific run_id."""
 

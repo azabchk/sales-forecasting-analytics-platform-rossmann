@@ -1,4 +1,8 @@
 ﻿fastapi==0.115.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.2.1
+slowapi==0.1.9
 uvicorn[standard]==0.32.1
 gunicorn==23.0.0
 APScheduler==3.10.4
@@ -13,3 +17,5 @@ joblib==1.4.2
 numpy==1.26.4
 scikit-learn==1.5.2
 catboost==1.2.7
+lightgbm>=4.0.0
+xgboost>=2.0.0

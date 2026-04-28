@@ -23,7 +23,9 @@ def get_contract_list() -> list[ContractSummaryResponse]:
     try:
         rows = list_contracts()
         return [ContractSummaryResponse.model_validate(row) for row in rows]
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -36,7 +38,9 @@ def get_contract_by_id(contract_id: str) -> ContractDetailResponse:
         return ContractDetailResponse.model_validate(row)
     except HTTPException:
         raise
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -50,7 +54,9 @@ def get_contract_versions(contract_id: str) -> list[ContractVersionSummaryRespon
         return [ContractVersionSummaryResponse.model_validate(row) for row in rows]
     except HTTPException:
         raise
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
@@ -66,5 +72,7 @@ def get_contract_version_by_id(contract_id: str, version: str) -> ContractVersio
         return ContractVersionDetailResponse.model_validate(row)
     except HTTPException:
         raise
-    except (FileNotFoundError, ValueError) as exc:
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

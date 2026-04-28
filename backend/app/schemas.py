@@ -9,10 +9,77 @@ class HealthResponse(BaseModel):
     status: str
 
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
+
+class UserLoginRequest(BaseModel):
+    email: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
+
+
+class UserRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=256)
+    username: str = Field(..., min_length=2, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
+    role: Literal["admin", "analyst"] = "analyst"
+
+
+class UserResponse(BaseModel):
+    id: int
+    email: str
+    username: str
+    role: str
+    is_active: bool
+    created_at: datetime
+    created_by: str | None = None
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+
 class StoreItem(BaseModel):
     store_id: int
     store_type: str | None = None
     assortment: str | None = None
+
+
+class StoreListResponse(BaseModel):
+    items: list[StoreItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class StoreComparisonMetrics(BaseModel):
+    store_id: int
+    store_type: str | None = None
+    assortment: str | None = None
+    competition_distance: float | None = None
+    total_sales: float
+    avg_daily_sales: float
+    total_customers: float
+    avg_daily_customers: float
+    promo_days: int
+    open_days: int
+    promo_uplift_pct: float | None = None
+
+
+class StoreComparisonResponse(BaseModel):
+    date_from: date
+    date_to: date
+    stores: list[StoreComparisonMetrics]
 
 
 class KpiSummaryResponse(BaseModel):
@@ -202,6 +269,8 @@ class ChatResponse(BaseModel):
     answer: str
     insights: list[ChatInsight] = Field(default_factory=list)
     suggestions: list[str] = Field(default_factory=list)
+    detected_intent: str | None = None
+    confidence_score: float | None = None
 
 
 class PreflightRunSummary(BaseModel):
