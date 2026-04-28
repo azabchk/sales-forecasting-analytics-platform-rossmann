@@ -1,428 +1,569 @@
 # Aqiq Analytics Platform
-### Sales Forecasting & Analytics System — Rossmann Dataset
 
-> **Diploma Project** — Full-stack machine learning platform for retail sales forecasting, scenario planning, and data operations management.
+Full-stack sales forecasting, scenario planning, and analytics platform built around the Rossmann Store Sales dataset.
 
----
+The project combines a FastAPI backend, PostgreSQL star-schema warehouse, React dashboard, ETL validation layer, and a multi-model machine-learning pipeline. It is designed for diploma defense demos, local experimentation, and production-style operational walkthroughs.
 
 ## Table of Contents
 
-- [Overview](#overview)
+- [What This Platform Does](#what-this-platform-does)
 - [Architecture](#architecture)
-- [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Machine Learning Pipeline](#machine-learning-pipeline)
+- [Core Capabilities](#core-capabilities)
+- [Repository Map](#repository-map)
+- [Prerequisites](#prerequisites)
 - [Quick Start](#quick-start)
-- [API Reference](#api-reference)
-- [Authentication](#authentication)
-- [Project Structure](#project-structure)
+- [Manual Setup](#manual-setup)
+- [Environment Variables](#environment-variables)
+- [Data And ML Artifacts](#data-and-ml-artifacts)
+- [API Surface](#api-surface)
+- [Authentication Model](#authentication-model)
+- [Verification](#verification)
+- [Operational Workflows](#operational-workflows)
+- [Deployment Notes](#deployment-notes)
+- [Troubleshooting](#troubleshooting)
 
----
+## What This Platform Does
 
-## Overview
+Aqiq Analytics turns historical Rossmann retail data into an interactive forecasting workspace:
 
-**Aqiq Analytics Platform** is an end-to-end analytics system built on the [Rossmann Store Sales](https://www.kaggle.com/c/rossmann-store-sales) dataset. It combines a production-grade REST API, an interactive React dashboard, and a multi-model ML pipeline to deliver:
-
-- **Daily sales forecasting** up to 180 days ahead per store
-- **What-if scenario planning** with price elasticity, promo modes, and demand shifts
-- **Portfolio-level forecasting** across up to 50 stores simultaneously
-- **Real-time KPI analytics** with promo impact analysis
-- **Data quality governance** via preflight validation and alert policies
-- **AI-powered chat assistant** for natural language analytics queries
-
----
+- Forecast daily sales for individual stores up to 180 days ahead.
+- Compare baseline forecasts against promo, price, holiday, and demand-shift scenarios.
+- Plan portfolio-level forecasts across store groups.
+- Monitor KPIs, promo uplift, store comparisons, and model metadata.
+- Validate incoming data before it reaches the analytics database.
+- Trigger retraining and inspect experiment/drift signals.
+- Ask natural-language analytics questions through the assistant workflow.
 
 ## Architecture
 
+```text
+Browser / React 18 / Vite
+        |
+        | JWT bearer auth
+        v
+FastAPI backend
+  - auth, users, health
+  - forecasts, scenarios, KPIs, stores, sales
+  - data sources, contracts, diagnostics, ML metadata
+        |
+        +--------------------+
+        |                    |
+        v                    v
+PostgreSQL 16           ML artifacts
+  - star schema           - model.joblib
+  - run registries        - model_metadata.json
+  - alert/outbox tables   - chat_intent_model.joblib
+        |
+        v
+Monitoring and operations
+  - Prometheus rules
+  - Grafana dashboard provisioning
+  - AlertManager config
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Browser (React 18)                      │
-│  Login → Dashboard → Forecast / Scenario / AI Assistant     │
-└──────────────────────────┬──────────────────────────────────┘
-                           │  HTTPS / JWT Bearer
-┌──────────────────────────▼──────────────────────────────────┐
-│              FastAPI Backend  (Python 3.12)                  │
-│  Auth · Forecast · KPI · Scenario · Chat · Diagnostics      │
-│  Rate Limiting (slowapi) · JWT + Refresh Token              │
-└────────┬─────────────────┬───────────────────────────────────┘
-         │                 │
-┌────────▼──────┐  ┌───────▼───────────────────────────────────┐
-│  PostgreSQL   │  │         ML Artifacts (joblib)              │
-│  Star Schema  │  │  CatBoost · LightGBM · XGBoost · Ridge     │
-│  + 8 tables   │  │  Ensemble · SHAP Importance                │
-└───────────────┘  └───────────────────────────────────────────┘
-         │
-┌────────▼──────────────────────────────────────────────────────┐
-│  Monitoring: Prometheus + Grafana + AlertManager              │
-└───────────────────────────────────────────────────────────────┘
-```
 
----
+## Core Capabilities
 
-## Features
+### Forecasting
 
-### Analytics & Forecasting
-
-| Feature | Description |
+| Capability | Detail |
 |---|---|
-| **Sales Forecast** | Recursive multi-step forecasting per store, 1–180 days |
-| **Confidence Intervals** | Horizon-scaled uncertainty bands (3%/day growth) |
-| **Batch Forecast** | Portfolio forecast across up to 50 stores simultaneously |
-| **Scenario Lab (V2)** | Price elasticity · promo modes · demand shift · store segments |
-| **KPI Dashboard** | Total sales · customers · avg daily · promo days |
-| **Store Comparison** | Side-by-side metrics for up to 10 stores |
-| **Promo Impact** | Avg sales on promo vs non-promo days per store |
-
-### ML Pipeline
-
-| Feature | Description |
-|---|---|
-| **4-model grid search** | Ridge · CatBoost (6 candidates) · LightGBM (3) · XGBoost (3) |
-| **Auto ensemble** | Averages top-3 tree models if composite score improves |
-| **SHAP importance** | Per-feature mean absolute SHAP values on validation set |
-| **Walk-forward CV** | 2-fold × 30-day rolling windows for stability reporting |
-| **Drift detection** | Compares latest vs previous experiment metrics |
-| **Retrain trigger** | One-click retraining from the UI |
-
-### Data Operations
-
-| Feature | Description |
-|---|---|
-| **Preflight validation** | Schema + semantic quality checks before data load |
-| **Alert policies** | Threshold-based alerts on preflight metrics |
-| **Webhook notifications** | HMAC-signed delivery with retry + dead-letter + replay |
-| **Data Pipeline page** | Freshness indicators · run history · manual trigger |
-| **Contract registry** | Versioned input data contracts with schema profiles |
-
-### Platform & Security
-
-| Feature | Description |
-|---|---|
-| **JWT Auth** | 8-hour access token + 7-day refresh token |
-| **Auto token refresh** | Transparent renewal on 401 — no session interruption |
-| **Rate limiting** | 200 req/min global · 10 req/min on login (brute-force protection) |
-| **User management** | Admin creates/activates/deactivates analyst accounts |
-| **Change password** | Users can update their own password from the UI |
-| **Prometheus metrics** | preflight runs · alerts · notifications · delivery latency |
-
-### AI Assistant
-
-| Intent | Example query |
-|---|---|
-| `forecast` | "Forecast store 1 for 30 days" |
-| `kpi_summary` | "Show KPI for 2015-07-01 to 2015-07-31" |
-| `promo_impact` | "What is the promo impact for store 5?" |
-| `top_stores` | "Show top 5 stores by total sales" |
-| `model_summary` | "What is the model accuracy?" |
-| `system_summary` | "How many stores are in the system?" |
-| `data_status` | "What is the data pipeline status?" |
-| `compare_stores` | "Compare store 1 and store 2" |
-
----
-
-## Tech Stack
-
-### Backend
-
-| Layer | Technology |
-|---|---|
-| API Framework | FastAPI 0.115 + Uvicorn |
-| Database | PostgreSQL 16 (star schema) |
-| ORM / Queries | SQLAlchemy 2.0 |
-| Auth | python-jose (JWT) + passlib/bcrypt |
-| Rate Limiting | slowapi |
-| Scheduling | APScheduler 3.10 |
-| Validation | Pydantic v2 |
+| Single-store forecast | Recursive multi-step forecast for one store. |
+| Batch forecast | Portfolio forecast for up to 50 stores. |
+| Confidence intervals | Horizon-scaled uncertainty bands. |
+| Scenario lab | Price elasticity, promo mode, weekend opening, holidays, and demand shift. |
+| Store comparison | Side-by-side performance and trend metrics. |
 
 ### Machine Learning
 
-| Library | Use |
+| Capability | Detail |
 |---|---|
-| CatBoost 1.2 | Primary gradient boosting model |
-| LightGBM ≥4.0 | Second tree model in comparison |
-| XGBoost ≥2.0 | Third tree model in comparison |
-| scikit-learn 1.5 | Ridge baseline · TF-IDF chatbot pipeline |
-| pandas 2.2 | Feature engineering |
-| joblib | Model serialization |
+| Model families | Ridge, CatBoost, LightGBM, and XGBoost. |
+| Model selection | Holdout scoring with composite NRMSE/WAPE objective. |
+| Ensemble option | Tree-model ensemble when it improves validation quality. |
+| Explainability | SHAP-style feature-importance output in model metadata. |
+| Robustness checks | Walk-forward validation and drift comparison. |
 
-### Frontend
+### Data Operations
 
-| Library | Use |
+| Capability | Detail |
 |---|---|
-| React 18 + TypeScript | UI framework |
-| Vite 5 | Build tool |
-| React Router v6 | Client-side routing |
-| TanStack Query | Server state management |
-| Recharts | Charts and visualizations |
-| Axios | HTTP client |
+| Input contracts | Versioned schema contracts for Rossmann train/store data. |
+| Preflight validation | Schema, type, semantic, duplicate, and quality checks. |
+| Registries | Data source, ETL run, forecast run, ML experiment, alert, and notification tables. |
+| Notifications | HMAC-signed webhook delivery with retry/dead-letter support. |
+| Diagnostics | API and UI workflows for data availability and platform health. |
 
----
+### Application Experience
 
-## Machine Learning Pipeline
+| Area | Detail |
+|---|---|
+| Dashboard | Overview, KPIs, charts, data pipeline status, and model intelligence. |
+| Auth | Admin and analyst roles with JWT access/refresh tokens. |
+| Assistant | Intent-based analytics assistant for forecast, KPI, promo, model, and data questions. |
+| Frontend stack | React 18, TypeScript, Vite, TanStack Query, Axios, Recharts. |
 
-### Feature Engineering (43 features)
+## Repository Map
 
-```
-Calendar     → day_of_week, month, quarter, week_of_year, is_weekend,
-               day_of_month, is_month_start, is_month_end
+```text
+backend/
+  app/
+    routers/        FastAPI route modules
+    services/       Forecasting, KPI, diagnostics, alerts, contracts, ML logic
+    security/       JWT, password hashing, diagnostics API key auth
+    config.py       Pydantic settings loaded from .env
+  tests/            Backend pytest suite
 
-Lag features → lag_1, lag_3, lag_7, lag_14, lag_21, lag_28, lag_364
+frontend/
+  src/
+    pages/          Main application screens
+    components/     Charts, tables, cards, layout, protected routes
+    contexts/       Authentication context
+    api/            Axios client and typed endpoint functions
+    styles/         Design tokens and page/component CSS
 
-Rolling      → rolling_mean_7/14/28/56, rolling_std_7/14/28/56
+ml/
+  train.py          Multi-model sales forecasting pipeline
+  train_chatbot.py  Assistant intent classifier training
+  features.py       Forecast feature engineering
+  config.yaml       ML configuration and grid settings
+  artifacts/        Generated model artifacts
 
-Derived      → lag_1_to_mean_7_ratio, sales_velocity,
-               lag_364_to_mean_28_ratio
+etl/
+  etl_load.py       Rossmann ETL load flow
+  data_quality.py   Data quality checks
+  input_contract.py Contract-aware input handling
 
-Promo        → promo_density_7, promo_density_14
+src/
+  validation/       Shared input validation engine
+  etl/              SQLAlchemy registry helpers
 
-Store meta   → competition_distance, competition_distance_log, promo2
-
-Categorical  → state_holiday, store_type, assortment  (one-hot)
-```
-
-### Model Selection Logic
-
-```
-For each model family:
-  → Grid search over parameter candidates
-  → Evaluate on holdout (last 90 days)
-  → Composite score = 0.5 × NRMSE + 0.5 × WAPE
-
-Then:
-  → If ensemble(CatBoost + LightGBM + XGBoost) < best individual
-      → Select ensemble
-  → Else → Select best individual
-
-Final: SHAP values + walk-forward CV for robustness reporting
-```
-
-### Forecast Inference (Recursive)
-
-```
-For step 1..horizon_days:
-  1. Build feature row from rolling sales_history
-  2. One-hot encode categoricals → reindex to training columns
-  3. model.predict(x) → raw prediction
-  4. Inverse log1p transform
-  5. Apply demand_shift_pct multiplier
-  6. Clip to [prediction_floor, prediction_cap]
-  7. Interval: pred ± z × σ × (1 + 0.03 × min(step-1, 89))
-  8. Append prediction to sales_history for next step
+sql/                Database schema, views, indexes, users, V2 ecosystem tables
+scripts/            Local bootstrap, start, stop, smoke, doctor, deployment helpers
+config/             Alert policies, notification channels, input contracts
+monitoring/         Prometheus, Grafana, and AlertManager config
+docs/               Extended project and deployment documentation
 ```
 
----
+## Prerequisites
+
+- Python 3.11 or newer.
+- Node.js 18 or newer.
+- PostgreSQL 14 or newer, or Docker with Docker Compose.
+- Git.
+
+Recommended local ports:
+
+| Service | Port |
+|---|---:|
+| Backend API | 8000 |
+| Frontend | 5173 |
+| PostgreSQL | 5432 |
 
 ## Quick Start
 
-### Prerequisites
-- Python 3.11+
-- Node.js 18+
-- PostgreSQL 14+
+### Option 1: Windows PowerShell
 
-### 1 — Clone and configure
+The Windows bootstrap expects PostgreSQL to be installed locally and `psql.exe` to be available either on `PATH` or under a standard PostgreSQL install directory.
 
-```bash
-git clone <repo>
-cd sales-forecasting-analytics-platform-rossmann
-cp .env.example .env
-# Edit .env — set DATABASE_URL and SECRET_KEY
+```powershell
+Copy-Item .env.example .env
+
+.\scripts\bootstrap_local_windows.ps1 `
+  -PostgresSuperUser postgres `
+  -PostgresSuperPassword postgres `
+  -DbUser rossmann_user `
+  -DbPassword change_me `
+  -DbName rossmann
+
+.\scripts\start_local_windows.ps1
 ```
 
-### 2 — Backend setup
+After startup:
+
+- Frontend: `http://localhost:5173`
+- API docs: `http://localhost:8000/docs`
+- Health: `http://localhost:8000/api/v1/health`
+
+Useful Windows helpers:
+
+```powershell
+.\scripts\status_local_windows.ps1
+.\scripts\stop_local_windows.ps1
+```
+
+### Option 2: Docker Compose Backend + Local Frontend
+
+```bash
+cp .env.example .env
+docker compose up -d postgres backend
+
+cd frontend
+npm install
+npm run dev
+```
+
+This starts PostgreSQL and the backend in containers, then serves the React app locally.
+
+### Option 3: Linux/macOS Dev Script
+
+```bash
+cp .env.example .env
+bash scripts/dev_up.sh
+```
+
+For a heavier demo startup that initializes data and trains a smoke model:
+
+```bash
+DEMO=1 bash scripts/dev_up.sh
+```
+
+Shutdown:
+
+```bash
+bash scripts/dev_down.sh
+```
+
+## Manual Setup
+
+Use this path when you want each subsystem under direct control.
+
+### 1. Configure Environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and set at least:
+
+- `DATABASE_URL`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_DB`
+- `CORS_ORIGINS`
+- `VITE_API_BASE_URL`
+
+### 2. Backend
 
 ```bash
 cd backend
 python -m venv .venv311
-source .venv311/bin/activate          # Windows: .venv311\Scripts\activate
+
+# Linux/macOS
+source .venv311/bin/activate
+
+# Windows PowerShell
+# .\.venv311\Scripts\Activate.ps1
+
 pip install -r requirements.txt
-```
-
-### 3 — Initialize database
-
-```bash
+cd ..
 python scripts/init_db.py
 ```
 
-### 4 — Create first admin account
+Start the API:
 
 ```bash
-python scripts/create_admin.py
-# Enter email, username, password when prompted
+cd backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### 5 — Frontend setup
+### 3. ETL
+
+```bash
+cd etl
+python -m venv .venv311
+source .venv311/bin/activate
+pip install -r requirements.txt
+python etl_load.py --config config.yaml
+python data_quality.py --config config.yaml
+```
+
+On Windows, activate with `.\.venv311\Scripts\Activate.ps1`.
+
+### 4. Machine Learning
+
+```bash
+cd ml
+python -m venv .venv311
+source .venv311/bin/activate
+pip install -r requirements.txt
+python train.py --config config.yaml
+python train_chatbot.py --config config.yaml
+```
+
+Generated artifacts are read by the backend through `MODEL_PATH`, `MODEL_METADATA_PATH`, and `CHAT_MODEL_PATH`.
+
+### 5. Frontend
 
 ```bash
 cd frontend
 npm install
+npm run dev
 ```
 
-### 6 — Start services
+Production build:
 
 ```bash
-# Linux — one command
-bash scripts/start_local_linux.sh
-
-# Or manually:
-# Terminal 1
-cd backend
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8001
-
-# Terminal 2
-cd frontend
-VITE_API_BASE_URL=http://localhost:8001/api/v1 npm run dev
+npm run build
 ```
 
-### 7 — Train ML models
+## Environment Variables
 
-```bash
-# Sales forecast model (~5-15 min depending on data size)
-cd ml && python train.py --config config.yaml
-
-# Chatbot intent classifier (~30 sec)
-cd ml && python train_chatbot.py --config config.yaml
-```
-
-### Access
-
-| Service | URL |
-|---|---|
-| Frontend | `http://localhost:5173` |
-| Backend API | `http://localhost:8001/api/v1` |
-| Interactive API Docs | `http://localhost:8001/docs` |
-
----
-
-## API Reference
-
-### Login
-
-```http
-POST /api/v1/auth/login
-Content-Type: application/json
-
-{
-  "email": "admin@example.com",
-  "password": "your_password"
-}
-```
-
-Response:
-```json
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "bearer",
-  "user": { "id": 1, "username": "admin", "role": "admin" }
-}
-```
-
-### Token Refresh
-
-```http
-POST /api/v1/auth/refresh
-{ "refresh_token": "eyJ..." }
-```
-
-### All protected endpoints
-
-```http
-Authorization: Bearer <access_token>
-```
-
-### Core endpoints
-
-```http
-POST   /api/v1/forecast                    # Single store forecast
-POST   /api/v1/forecast/batch              # Portfolio forecast
-POST   /api/v1/forecast/scenario           # Scenario vs baseline
-POST   /api/v1/scenario/run               # V2 scenario (store or segment)
-GET    /api/v1/kpi/summary                 # KPI metrics
-GET    /api/v1/kpi/promo-impact            # Promo uplift
-GET    /api/v1/sales/timeseries            # Time-series data
-GET    /api/v1/stores                      # Paginated store list
-GET    /api/v1/stores/comparison           # Multi-store comparison
-POST   /api/v1/chat/query                  # AI assistant
-GET    /api/v1/model/metadata              # Current model info
-POST   /api/v1/ml/retrain                  # Trigger retraining
-GET    /api/v1/ml/drift                    # Model drift detection
-GET    /api/v1/auth/users                  # List users (admin)
-POST   /api/v1/auth/register               # Create user (admin)
-PATCH  /api/v1/auth/me/password            # Change password
-```
-
----
-
-## Authentication
-
-Two-token JWT strategy:
-
-| Token | Expiry | Purpose |
+| Variable | Purpose | Default / Example |
 |---|---|---|
-| **Access token** | 8 hours | API authorization |
-| **Refresh token** | 7 days | Silent access token renewal |
+| `DATABASE_URL` | SQLAlchemy URL used by local backend/scripts. | `postgresql+psycopg2://rossmann_user:change_me@localhost:5432/rossmann` |
+| `DATABASE_URL_DOCKER` | SQLAlchemy URL used inside Docker network. | `postgresql+psycopg2://rossmann_user:change_me@postgres:5432/rossmann` |
+| `POSTGRES_HOST` | PostgreSQL host. | `localhost` |
+| `POSTGRES_PORT` | PostgreSQL port. | `5432` |
+| `POSTGRES_DB` | Database name. | `rossmann` |
+| `POSTGRES_USER` | Database user. | `rossmann_user` |
+| `POSTGRES_PASSWORD` | Database password. | `change_me` |
+| `ENVIRONMENT` | Runtime environment. Production tightens CORS behavior. | `development` |
+| `BACKEND_HOST` | Backend bind host. | `0.0.0.0` |
+| `BACKEND_PORT` | Backend port. | `8000` |
+| `FRONTEND_PORT` | Frontend dev port. | `5173` |
+| `CORS_ORIGINS` | Comma-separated frontend origins allowed by the API. | `http://localhost:5173` |
+| `MODEL_PATH` | Sales forecast model artifact path. | `ml/artifacts/model.joblib` |
+| `MODEL_METADATA_PATH` | Sales model metadata artifact path. | `ml/artifacts/model_metadata.json` |
+| `CHAT_MODEL_PATH` | Assistant intent model artifact path. | `ml/artifacts/chat_intent_model.joblib` |
+| `CONTRACTS_REGISTRY_PATH` | Input contract registry path. | `config/input_contract/contracts_registry.yaml` |
+| `SCENARIO_PRICE_ELASTICITY` | Scenario service price elasticity multiplier. | `1.0` |
+| `SCENARIO_MAX_SEGMENT_STORES` | Store cap for segment scenario runs. | `50` |
+| `VITE_API_BASE_URL` | Frontend API base URL. | `http://localhost:8000/api/v1` |
 
-When the access token expires, the Axios interceptor:
-1. Intercepts the 401 response
-2. Calls `POST /auth/refresh` with the stored refresh token
-3. Updates both tokens in `localStorage`
-4. Retries the original request automatically
-5. Queues any concurrent requests during the refresh window
+## Data And ML Artifacts
 
-**Roles:**
+The platform expects Rossmann-style train and store inputs. The contract definitions live in `config/input_contract/`, and fixtures for validation tests live in `tests/fixtures/input_samples/`.
 
-| Role | Permissions |
+Typical data path:
+
+```text
+Raw Rossmann CSV files
+        |
+        v
+Input contract and preflight validation
+        |
+        v
+ETL load into PostgreSQL star schema
+        |
+        v
+ML training and model metadata generation
+        |
+        v
+Forecast, scenario, KPI, and dashboard APIs
+```
+
+Important generated outputs:
+
+| Artifact | Producer | Consumer |
+|---|---|---|
+| `ml/artifacts/model.joblib` | `ml/train.py` | Forecast and scenario services |
+| `ml/artifacts/model_metadata.json` | `ml/train.py` | Model metadata and dashboard pages |
+| `ml/artifacts/chat_intent_model.joblib` | `ml/train_chatbot.py` | Assistant service |
+| `validation_reports/` | Validation and demo flows | Diagnostics and project evidence |
+
+## API Surface
+
+Interactive OpenAPI docs are available at:
+
+```text
+http://localhost:8000/docs
+```
+
+Common endpoints:
+
+| Method | Path | Purpose |
+|---|---|---|
+| `GET` | `/api/v1/health` | Backend health check. |
+| `POST` | `/api/v1/auth/login` | Create access and refresh tokens. |
+| `POST` | `/api/v1/auth/refresh` | Refresh access token. |
+| `GET` | `/api/v1/auth/users` | List users, admin only. |
+| `POST` | `/api/v1/auth/register` | Create user, admin only. |
+| `PATCH` | `/api/v1/auth/me/password` | Change current user's password. |
+| `POST` | `/api/v1/forecast` | Single-store forecast. |
+| `POST` | `/api/v1/forecast/batch` | Multi-store forecast. |
+| `POST` | `/api/v1/forecast/scenario` | Baseline versus scenario forecast. |
+| `POST` | `/api/v1/scenario/run` | V2 scenario workflow. |
+| `GET` | `/api/v1/kpi/summary` | KPI summary metrics. |
+| `GET` | `/api/v1/kpi/promo-impact` | Promo uplift analysis. |
+| `GET` | `/api/v1/sales/timeseries` | Sales time series. |
+| `GET` | `/api/v1/stores` | Paginated store list. |
+| `GET` | `/api/v1/stores/comparison` | Multi-store comparison. |
+| `POST` | `/api/v1/chat/query` | Assistant query. |
+| `GET` | `/api/v1/model/metadata` | Current model metadata. |
+| `POST` | `/api/v1/ml/retrain` | Trigger retraining. |
+| `GET` | `/api/v1/ml/drift` | Drift comparison. |
+| `GET` | `/api/v1/data-sources` | Data source registry. |
+| `GET` | `/api/v1/contracts` | Input contract registry. |
+| `GET` | `/api/v1/diagnostics/*` | Diagnostics and operational evidence. |
+
+## Authentication Model
+
+The backend uses a two-token JWT strategy:
+
+| Token | Lifetime | Use |
+|---|---|---|
+| Access token | 8 hours | API authorization. |
+| Refresh token | 7 days | Silent session renewal. |
+
+Frontend behavior:
+
+1. Login stores access and refresh tokens.
+2. API calls use `Authorization: Bearer <access_token>`.
+3. On a 401 response, the Axios client calls `/auth/refresh`.
+4. Pending requests wait while refresh is in progress.
+5. The original request retries with the new access token.
+
+Roles:
+
+| Role | Access |
 |---|---|
-| `admin` | Full access + user management + retrain |
-| `analyst` | All analytics features, read-only for users |
+| `admin` | Full analytics, diagnostics, user management, and retraining. |
+| `analyst` | Analytics and forecasting workflows without user administration. |
 
----
+## Verification
 
-## Project Structure
+### Backend Tests
 
-```
-├── backend/
-│   ├── app/
-│   │   ├── main.py            Entry point · middleware · routers
-│   │   ├── config.py          Settings (pydantic-settings)
-│   │   ├── db.py              SQLAlchemy engine
-│   │   ├── schemas.py         Pydantic models (70+ schemas)
-│   │   ├── routers/           12 API router modules
-│   │   ├── services/          15 business logic services
-│   │   └── security/          JWT · bcrypt · rate limiting
-│   └── tests/                 pytest suite (20+ test files)
-│
-├── ml/
-│   ├── train.py               Multi-model training pipeline
-│   ├── train_chatbot.py       Intent classifier (TF-IDF + LogReg)
-│   ├── features.py            Feature engineering
-│   ├── config.yaml            Hyperparameter grid definitions
-│   └── artifacts/             model.joblib · chat_intent_model.joblib
-│
-├── frontend/
-│   └── src/
-│       ├── pages/             13 page components
-│       ├── components/        Reusable UI (ErrorBoundary, Charts, Table)
-│       ├── contexts/          AuthContext (JWT + auto-refresh)
-│       ├── api/               Axios client + 50+ typed endpoint functions
-│       └── lib/               i18n · theme · CSV export · formatting
-│
-├── sql/
-│   ├── 01_schema.sql          dim_store · dim_date · fact_sales_daily
-│   ├── 02_views_kpi.sql       6 analytics views
-│   ├── 03_indexes.sql         Performance indexes
-│   ├── 04_v2_ecosystem.sql    data_source · run registries · ML experiments
-│   └── 05_users.sql           User accounts table
-│
-├── src/etl/                   Shared SQLAlchemy registries
-├── config/                    Alert policies · notification channels YAML
-├── monitoring/                Prometheus · Grafana · AlertManager configs
-├── scripts/                   Bootstrap · start · stop · create_admin
-└── docker-compose.yml         PostgreSQL + backend for local development
+```bash
+cd backend
+python -m pytest
 ```
 
----
+### Shared Validation And Registry Tests
 
-*Built with FastAPI · React 18 · CatBoost · LightGBM · XGBoost · PostgreSQL*
+```bash
+python -m pytest tests
+```
 
-*Diploma project — 2026*
+### Frontend Build
+
+```bash
+cd frontend
+npm run build
+```
+
+### Smoke Test
+
+The smoke script starts PostgreSQL, initializes the database, runs ETL, trains a smoke model, starts the backend, and checks critical API responses.
+
+```bash
+bash scripts/smoke.sh
+```
+
+Optional frontend build during smoke:
+
+```bash
+SMOKE_FRONTEND_BUILD=1 bash scripts/smoke.sh
+```
+
+### Doctor Report
+
+```bash
+bash scripts/doctor.sh
+```
+
+With UI evidence capture:
+
+```bash
+DOCTOR_CAPTURE_UI=1 bash scripts/doctor.sh
+```
+
+Doctor artifacts are written under `artifacts/doctor/` and `artifacts/ui-debug/`.
+
+## Operational Workflows
+
+### Load Fresh Data
+
+```bash
+python scripts/init_db.py
+cd etl
+python etl_load.py --config config.yaml
+python data_quality.py --config config.yaml
+```
+
+### Train Forecasting Model
+
+```bash
+cd ml
+python train.py --config config.yaml
+```
+
+For faster local checks, use the smoke mode supported by the project scripts:
+
+```bash
+ML_SMOKE_MODE=1 bash scripts/smoke.sh
+```
+
+### Train Assistant Intent Model
+
+```bash
+cd ml
+python train_chatbot.py --config config.yaml
+```
+
+### Create First Admin
+
+```bash
+python scripts/create_admin.py
+```
+
+The script prompts for email, username, and password.
+
+### Start And Stop Local Services
+
+Windows:
+
+```powershell
+.\scripts\start_local_windows.ps1
+.\scripts\stop_local_windows.ps1
+```
+
+Linux/macOS:
+
+```bash
+bash scripts/dev_up.sh
+bash scripts/dev_down.sh
+```
+
+## Deployment Notes
+
+Deployment references are included in `docs/` and `infra/`:
+
+| Target | Files |
+|---|---|
+| Docker Compose production profile | `compose.production.yaml`, `.env.production.example` |
+| Render | `infra/render/render.yaml`, `docs/DEPLOY-BACKEND-PAAS.md` |
+| Fly.io | `infra/fly/fly.toml` |
+| Vercel frontend | `frontend/vercel.json`, `docs/DEPLOY-VERCEL.md` |
+| Nginx SPA hosting | `infra/nginx/default.conf`, `frontend/nginx-spa.conf` |
+| Managed PostgreSQL | `docs/MANAGED-POSTGRES.md` |
+| Production checklist | `docs/PROD-CHECKLIST.md` |
+
+Production reminders:
+
+- Set `ENVIRONMENT=production`.
+- Configure explicit `CORS_ORIGINS` or `CORS_ALLOW_ORIGINS`.
+- Replace default database credentials.
+- Use persistent PostgreSQL storage.
+- Provide trained ML artifacts or run the training workflow before forecast traffic.
+- Configure webhook secrets before enabling notification channels.
+- Run smoke and frontend build checks before release.
+
+## Troubleshooting
+
+| Symptom | Check |
+|---|---|
+| Backend cannot connect to DB | Confirm `DATABASE_URL`, PostgreSQL status, user, password, and database name. |
+| Frontend shows API errors | Confirm `VITE_API_BASE_URL` points to `/api/v1` and CORS includes the frontend origin. |
+| Forecast endpoint returns missing model/artifact errors | Run `ml/train.py` and verify `MODEL_PATH` and `MODEL_METADATA_PATH`. |
+| Assistant has low-confidence or unavailable responses | Run `ml/train_chatbot.py` and verify `CHAT_MODEL_PATH`. |
+| Empty charts or missing store data | Run ETL and then `bash scripts/doctor.sh`. |
+| Port is busy | Use custom backend/frontend ports or stop stale local processes. |
+| Docker backend is unhealthy | Inspect `docker compose logs backend postgres`. |
+| Windows bootstrap cannot find PostgreSQL | Install PostgreSQL or add `psql.exe` to `PATH`. |
+
+## Project Status
+
+This repository is a diploma-grade analytics platform with production-style boundaries: typed API schemas, role-based access, validation contracts, operational diagnostics, monitoring config, and automated smoke coverage.
+
+Built with FastAPI, React 18, PostgreSQL, CatBoost, LightGBM, XGBoost, scikit-learn, and the Rossmann Store Sales dataset.
