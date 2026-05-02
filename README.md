@@ -2,7 +2,9 @@
 
 Full-stack sales forecasting, scenario planning, and analytics platform built around the Rossmann Store Sales dataset.
 
-The project combines a FastAPI backend, PostgreSQL star-schema warehouse, React dashboard, ETL validation layer, and a multi-model machine-learning pipeline. It is designed for diploma defense demos, local experimentation, and production-style operational walkthroughs.
+The project combines a FastAPI backend, PostgreSQL star-schema warehouse, React 18 dashboard, ETL validation layer, and a multi-model machine-learning pipeline. It is designed for diploma defense demos, local experimentation, and production-style operational walkthroughs.
+
+> **Status:** Production-ready — JWT auth, rate limiting, refresh tokens, model drift detection, and full user management included.
 
 ## Table of Contents
 
