@@ -169,10 +169,23 @@ ensure_venv() {
   "$venv_path/bin/python" -m pip install --retries "$pip_retries" --timeout "$pip_timeout" -r "$requirements_file" >/dev/null
 }
 
+SMOKE_USER_EMAIL="${SMOKE_USER_EMAIL:-smoke@example.com}"
+SMOKE_USER_PASSWORD="${SMOKE_USER_PASSWORD:-SmokePass123!}"
+SMOKE_AUTH_TOKEN=""
+
+fetch_smoke_token() {
+  local response
+  response="$(curl -fsS -X POST "$BACKEND_BASE_URL/api/v1/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SMOKE_USER_EMAIL\",\"password\":\"$SMOKE_USER_PASSWORD\"}")"
+  SMOKE_AUTH_TOKEN="$(printf '%s' "$response" | "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin)["access_token"])')"
+  echo "[SMOKE] Authenticated as $SMOKE_USER_EMAIL"
+}
+
 assert_json_array_endpoint() {
   local endpoint="$1"
   local payload
-  payload="$(curl -fsS "$BACKEND_BASE_URL$endpoint")"
+  payload="$(curl -fsS -H "Authorization: Bearer $SMOKE_AUTH_TOKEN" "$BACKEND_BASE_URL$endpoint")"
 
   printf '%s' "$payload" | "$PYTHON_BIN" -c '
 import json
@@ -188,7 +201,7 @@ print(f"[SMOKE] JSON array size: {len(obj)}")
 assert_json_payload_endpoint() {
   local endpoint="$1"
   local payload
-  payload="$(curl -fsS "$BACKEND_BASE_URL$endpoint")"
+  payload="$(curl -fsS -H "Authorization: Bearer $SMOKE_AUTH_TOKEN" "$BACKEND_BASE_URL$endpoint")"
 
   printf '%s' "$payload" | "$PYTHON_BIN" -c '
 import json
@@ -209,7 +222,10 @@ assert_scenario_response() {
   payload='{"store_id":1,"horizon_days":7,"price_change_pct":0.0,"promo_mode":"as_is","weekend_open":true,"school_holiday":0,"demand_shift_pct":0.0,"confidence_level":0.8}'
 
   local response
-  response="$(curl -fsS -X POST "$BACKEND_BASE_URL/api/v1/scenario/run" -H 'Content-Type: application/json' -d "$payload")"
+  response="$(curl -fsS -X POST "$BACKEND_BASE_URL/api/v1/scenario/run" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer $SMOKE_AUTH_TOKEN" \
+    -d "$payload")"
 
   printf '%s' "$response" | "$PYTHON_BIN" -c '
 import json
@@ -243,6 +259,10 @@ ensure_venv "$ROOT_DIR/backend/.venv311" "$ROOT_DIR/backend/requirements.txt"
 echo "[SMOKE] Running DB init..."
 "$ROOT_DIR/backend/.venv311/bin/python" scripts/init_db.py
 
+echo "[SMOKE] Creating smoke user..."
+DATABASE_URL="$DATABASE_URL" \
+"$ROOT_DIR/backend/.venv311/bin/python" scripts/create_smoke_user.py
+
 echo "[SMOKE] Running ETL..."
 ensure_venv "$ROOT_DIR/etl/.venv311" "$ROOT_DIR/etl/requirements.txt"
 SMOKE_PREFLIGHT_MODE="$(resolve_preflight_mode "${PREFLIGHT_MODE:-off}")"
@@ -269,6 +289,7 @@ fi
 
 echo "[SMOKE] API checks..."
 curl -fsS "$BACKEND_BASE_URL/api/v1/health" | "$PYTHON_BIN" -c 'import json,sys; print("[SMOKE] health=", json.load(sys.stdin)["status"])'
+fetch_smoke_token
 assert_json_array_endpoint "/api/v1/data-sources"
 assert_json_array_endpoint "/api/v1/contracts"
 assert_json_payload_endpoint "/api/v1/ml/experiments"
