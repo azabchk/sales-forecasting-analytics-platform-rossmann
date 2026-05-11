@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -23,6 +24,8 @@ from app.security.jwt import (
 router = APIRouter()
 _limiter = Limiter(key_func=get_remote_address)
 
+logger = logging.getLogger("app.auth")
+
 
 def _get_user_by_email(email: str) -> dict[str, Any] | None:
     return fetch_one(
@@ -39,9 +42,11 @@ def _get_user_by_id(user_id: int) -> dict[str, Any] | None:
 
 
 @router.post("/auth/login", response_model=TokenResponse)
+@_limiter.limit("5/minute")
 def login(payload: UserLoginRequest, request: Request) -> TokenResponse:
     user = _get_user_by_email(payload.email)
     if not user or not verify_password(payload.password, user["hashed_password"]):
+        logger.warning("Failed login attempt for email=%s ip=%s", payload.email, request.client.host if request.client else "unknown")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -52,6 +57,7 @@ def login(payload: UserLoginRequest, request: Request) -> TokenResponse:
             detail="Account is disabled",
         )
 
+    logger.info("Successful login: user_id=%s email=%s ip=%s", user["id"], user["email"], request.client.host if request.client else "unknown")
     token_data = {"sub": str(user["id"]), "role": user["role"]}
     token = create_access_token(token_data)
     refresh = create_refresh_token(token_data)
@@ -139,6 +145,7 @@ def register_user(
         )
         row = dict(result.mappings().first())
 
+    logger.info("User registered: email=%s role=%s by_admin=%s", email, payload.role, admin["email"])
     return UserResponse(**row)
 
 
@@ -169,6 +176,7 @@ def deactivate_user(
         row = result.mappings().first()
     if not row:
         raise HTTPException(status_code=404, detail="User not found")
+    logger.info("User deactivated: user_id=%s by_admin=%s", user_id, admin["email"])
     return UserResponse(**dict(row))
 
 
@@ -190,6 +198,7 @@ def change_password(
             sa.text("UPDATE users SET hashed_password = :h WHERE id = :id"),
             {"h": new_hashed, "id": current_user["id"]},
         )
+    logger.info("Password changed: user_id=%s", current_user["id"])
     return {"detail": "Password changed successfully"}
 
 

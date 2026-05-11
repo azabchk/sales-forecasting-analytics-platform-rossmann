@@ -28,6 +28,10 @@ jobs:
           python -m pip install --upgrade pip --retries 10 --timeout 60
           python -m pip install --retries 10 --timeout 60 -r backend/requirements.txt
           python -m pip install --retries 10 --timeout 60 -r backend/requirements-dev.txt
+          python -m pip install --retries 10 --timeout 60 pip-audit
+
+      - name: Audit Python dependencies
+        run: pip-audit -r backend/requirements.txt --ignore-vuln GHSA-34jh-p97f-mpxf || true
 
       - name: Compile backend app
         run: python -m compileall backend/app
@@ -54,6 +58,10 @@ jobs:
       - name: Install frontend deps
         working-directory: frontend
         run: npm ci
+
+      - name: Audit frontend dependencies
+        working-directory: frontend
+        run: npm audit --audit-level=high || true
 
       - name: Build frontend
         working-directory: frontend

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from statistics import NormalDist
 from typing import Any
 import uuid
 import sys
+
+logger = logging.getLogger("app.forecast")
 
 import joblib
 import numpy as np
@@ -488,6 +491,7 @@ def forecast_for_store(
             created_at=started_at,
         )
 
+    logger.info("forecast_for_store: store_id=%s horizon_days=%s data_source_id=%s", store_id, horizon_days, resolved_data_source_id)
     try:
         artifact = _load_artifact()
         model, categorical_columns, feature_columns, target_transform, floor, cap, sigma = _extract_artifact_parts(artifact)
@@ -497,6 +501,7 @@ def forecast_for_store(
         cached = _forecast_cache_get(cache_key)
 
         if cached is not None:
+            logger.debug("forecast cache hit: store_id=%s horizon_days=%s", store_id, horizon_days)
             result = cached
         else:
             history = _fetch_history(engine, store_id=store_id, history_days=400)
@@ -533,6 +538,7 @@ def forecast_for_store(
             )
         return result
     except Exception as exc:
+        logger.exception("forecast_for_store failed: store_id=%s horizon_days=%s error=%s", store_id, horizon_days, exc)
         if _record_run and run_id is not None:
             _record_forecast_run(
                 run_id=run_id,

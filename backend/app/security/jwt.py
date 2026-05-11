@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -12,8 +13,24 @@ import sqlalchemy as sa
 
 from app.db import fetch_one
 
-SECRET_KEY = os.getenv("SECRET_KEY", "change-me-in-production-use-long-random-string")
+logger = logging.getLogger("app.security")
+
+_DEFAULT_SECRET = "change-me-in-production-use-long-random-string"
+
+SECRET_KEY = os.getenv("SECRET_KEY", _DEFAULT_SECRET)
 REFRESH_SECRET_KEY = os.getenv("REFRESH_SECRET_KEY", SECRET_KEY + "_refresh")
+
+# Warn loudly if running with insecure defaults
+if SECRET_KEY == _DEFAULT_SECRET:
+    logger.warning(
+        "SECRET_KEY is set to the insecure default value. "
+        "Set the SECRET_KEY environment variable before deploying to production."
+    )
+if os.getenv("ENVIRONMENT", "development").lower() == "production" and SECRET_KEY == _DEFAULT_SECRET:
+    raise RuntimeError(
+        "Cannot start in production mode with default SECRET_KEY. "
+        "Set a strong random SECRET_KEY environment variable."
+    )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_HOURS = 8
 REFRESH_TOKEN_EXPIRE_DAYS = 7

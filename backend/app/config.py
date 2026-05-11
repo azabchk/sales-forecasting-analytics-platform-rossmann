@@ -1,7 +1,10 @@
-﻿from functools import lru_cache
+﻿import logging
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger("app.config")
 
 
 class Settings(BaseSettings):
@@ -40,6 +43,11 @@ class Settings(BaseSettings):
                 "http://127.0.0.1:5173",
             ]
             origins = list(dict.fromkeys([*origins, *dev_origins]))
+            logger.warning(
+                "CORS: running in '%s' mode — localhost origins are allowed. "
+                "Set ENVIRONMENT=production to restrict CORS to configured origins only.",
+                self.environment,
+            )
         return origins
 
 
