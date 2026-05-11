@@ -1,12 +1,18 @@
-﻿from functools import lru_cache
+﻿import logging
+from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+logger = logging.getLogger("app.config")
+
 
 class Settings(BaseSettings):
     database_url: str
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = ""
+    cors_allow_origins: str | None = None
+    environment: str = "development"
+    frontend_port: int = 5173
     model_path: str = "ml/artifacts/model.joblib"
     model_metadata_path: str = "ml/artifacts/model_metadata.json"
     chat_model_path: str = "ml/artifacts/chat_intent_model.joblib"
@@ -23,7 +29,26 @@ class Settings(BaseSettings):
 
     @property
     def cors_list(self) -> list[str]:
-        return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
+        raw_origins = self.cors_allow_origins if self.cors_allow_origins else self.cors_origins
+        origins = [item.strip() for item in raw_origins.split(",") if item.strip()]
+        if self.environment.lower() == "production":
+            # In production we only trust explicitly configured allowlist origins.
+            return origins
+
+        if self.environment.lower() != "production":
+            dev_origins = [
+                f"http://localhost:{self.frontend_port}",
+                f"http://127.0.0.1:{self.frontend_port}",
+                "http://localhost:5173",
+                "http://127.0.0.1:5173",
+            ]
+            origins = list(dict.fromkeys([*origins, *dev_origins]))
+            logger.warning(
+                "CORS: running in '%s' mode — localhost origins are allowed. "
+                "Set ENVIRONMENT=production to restrict CORS to configured origins only.",
+                self.environment,
+            )
+        return origins
 
 
 @lru_cache

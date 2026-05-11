@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import os
+import socket
 import sys
 import threading
+from functools import lru_cache
 import urllib.error
 import urllib.request
 import uuid
@@ -35,6 +38,7 @@ from src.etl.preflight_notification_outbox_registry import (  # noqa: E402
     query_outbox_items,
 )
 from src.etl.preflight_notification_attempt_registry import (  # noqa: E402
+    count_delivery_attempts,
     complete_delivery_attempt,
     get_delivery_attempt,
     insert_delivery_attempt_started,
@@ -374,6 +378,78 @@ def _resolve_env_reference(value: str | None) -> str | None:
     return normalized
 
 
+def _allow_private_webhook_targets() -> bool:
+    raw = str(os.getenv("PREFLIGHT_ALERTS_WEBHOOK_ALLOW_PRIVATE_TARGETS", "0")).strip().lower()
+    return raw in {"1", "true", "yes", "y", "on"}
+
+
+def _is_private_or_local_ip_address(candidate: str) -> bool:
+    try:
+        ip_obj = ipaddress.ip_address(candidate)
+    except ValueError:
+        return False
+    return any(
+        [
+            ip_obj.is_private,
+            ip_obj.is_loopback,
+            ip_obj.is_link_local,
+            ip_obj.is_multicast,
+            ip_obj.is_reserved,
+            ip_obj.is_unspecified,
+        ]
+    )
+
+
+@lru_cache(maxsize=512)
+def _hostname_points_to_private_or_local_target(hostname: str) -> bool:
+    normalized = str(hostname).strip().strip("[]").lower()
+    if not normalized:
+        return False
+    if normalized in {"localhost", "localhost.localdomain"}:
+        return True
+    if _is_private_or_local_ip_address(normalized):
+        return True
+
+    try:
+        resolved = socket.getaddrinfo(normalized, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        return False
+
+    for item in resolved:
+        sockaddr = item[4]
+        if not sockaddr:
+            continue
+        resolved_host = str(sockaddr[0]).strip()
+        if _is_private_or_local_ip_address(resolved_host):
+            return True
+    return False
+
+
+def _validate_webhook_target_url(target_url: str, *, allow_private_targets: bool) -> str:
+    normalized = str(target_url or "").strip()
+    if not normalized:
+        raise ValueError("Webhook target URL is not configured.")
+
+    parsed = urlparse(normalized)
+    scheme = str(parsed.scheme or "").lower()
+    if scheme not in {"http", "https"}:
+        raise ValueError("Webhook target URL must use http or https scheme.")
+    if not parsed.netloc:
+        raise ValueError("Webhook target URL must include a hostname.")
+    if parsed.username or parsed.password:
+        raise ValueError("Webhook target URL must not include embedded credentials.")
+
+    host = parsed.hostname
+    if not host:
+        raise ValueError("Webhook target URL must include a valid hostname.")
+    if not allow_private_targets and _hostname_points_to_private_or_local_target(host):
+        raise ValueError(
+            "Webhook target URL resolves to a private/local address; "
+            "set PREFLIGHT_ALERTS_WEBHOOK_ALLOW_PRIVATE_TARGETS=1 to allow it."
+        )
+    return normalized
+
+
 def _normalize_event_types(raw_value: Any) -> tuple[str, ...]:
     if not isinstance(raw_value, list):
         return tuple(sorted(SUPPORTED_EVENT_TYPES))
@@ -415,11 +491,18 @@ def _normalize_channel(payload: dict[str, Any]) -> NotificationChannel:
     backoff_seconds = max(1, int(payload.get("backoff_seconds", 30)))
     signing_secret_env = str(payload.get("signing_secret_env", "")).strip() or None
 
+    target_url = _resolve_target_url(payload)
+    if target_url:
+        target_url = _validate_webhook_target_url(
+            target_url,
+            allow_private_targets=_allow_private_webhook_targets(),
+        )
+
     return NotificationChannel(
         id=channel_id,
         channel_type=channel_type,
         enabled=bool(payload.get("enabled", False)),
-        target_url=_resolve_target_url(payload),
+        target_url=target_url,
         timeout_seconds=timeout_seconds,
         max_attempts=max_attempts,
         backoff_seconds=backoff_seconds,
@@ -660,6 +743,20 @@ def _send_webhook_request(channel: NotificationChannel, payload: dict[str, Any])
             error_code="CHANNEL_TARGET_MISSING",
         )
 
+    try:
+        target_url = _validate_webhook_target_url(
+            str(channel.target_url),
+            allow_private_targets=_allow_private_webhook_targets(),
+        )
+    except ValueError as exc:
+        return WebhookDeliveryResult(
+            success=False,
+            retryable=False,
+            status_code=None,
+            error=str(exc),
+            error_code="TARGET_URL_BLOCKED",
+        )
+
     event_id = _normalize_event_id(str(payload.get("event_id", "")).strip() or None)
     delivery_meta = payload.get("delivery") if isinstance(payload.get("delivery"), dict) else {}
     delivery_id = _normalize_delivery_id(str(delivery_meta.get("delivery_id", "")).strip() or None)
@@ -694,7 +791,7 @@ def _send_webhook_request(channel: NotificationChannel, payload: dict[str, Any])
         logger.warning("Webhook signing secret env is not set for channel=%s; dispatching unsigned.", channel.id)
 
     request = urllib.request.Request(
-        url=channel.target_url,
+        url=target_url,
         data=body_bytes,
         headers=headers,
         method="POST",
@@ -1590,15 +1687,17 @@ def get_notification_deliveries(
                 "PENDING, RETRYING, SENT, DEAD, FAILED, STARTED, RETRY."
             )
 
-    rows = query_delivery_attempts(
-        attempt_statuses=(normalized_attempt_status,) if normalized_attempt_status else None,
-        limit=None,
+    attempt_statuses = (normalized_attempt_status,) if normalized_attempt_status else None
+    total = count_delivery_attempts(
+        attempt_statuses=attempt_statuses,
+    )
+    start = (normalized_page - 1) * normalized_page_size
+    page_rows = query_delivery_attempts(
+        attempt_statuses=attempt_statuses,
+        limit=normalized_page_size,
+        offset=start,
         descending=True,
     )
-    total = len(rows)
-    start = (normalized_page - 1) * normalized_page_size
-    end = start + normalized_page_size
-    page_rows = rows[start:end]
 
     return {
         "page": normalized_page,

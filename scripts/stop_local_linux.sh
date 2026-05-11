@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-pkill -f "uvicorn app.main:app" || true
-pkill -f "vite" || true
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-echo "Stopped backend/frontend processes (if any were running)."
+pkill -f "uvicorn app.main:app" 2>/dev/null || true
+pkill -f "vite" 2>/dev/null || true
+
+rm -f "$ROOT_DIR/.backend.pid" "$ROOT_DIR/.frontend.pid"
+echo "Backend and frontend processes stopped."

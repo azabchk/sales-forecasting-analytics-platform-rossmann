@@ -1,32 +1,99 @@
-﻿database:
+database:
   url_env: DATABASE_URL
 
 training:
-  validation_days: 60
+  validation_days: 90           # extended from 60 — covers ~3 months for more robust evaluation
   random_state: 42
   model_path: artifacts/model.joblib
   metadata_path: artifacts/model_metadata.json
   target_transform: log1p
   prediction_floor: 0.0
   prediction_cap_quantile: 0.997
-  early_stopping_rounds: 60
+  early_stopping_rounds: 80     # increased from 60 — allows deeper convergence
+  cv_window_days: 30            # each walk-forward fold window size
+  cv_folds: 2                   # number of walk-forward CV folds for stability reporting
+
+  # 6-candidate CatBoost grid — covers depth/LR/regularisation tradeoffs
   catboost_param_grid:
+    # 1. Shallow + fast — low variance, high regularisation
+    - depth: 6
+      learning_rate: 0.08
+      l2_leaf_reg: 2.0
+      iterations: 500
+    # 2. Balanced — solid general baseline
     - depth: 8
       learning_rate: 0.05
       l2_leaf_reg: 3.0
-      iterations: 500
+      iterations: 700
+    # 3. Deep + regularised — captures complex feature interactions
     - depth: 10
       learning_rate: 0.03
       l2_leaf_reg: 5.0
-      iterations: 700
+      iterations: 1000
+    # 4. Wide + slow LR — strong convergence on dense feature sets
+    - depth: 8
+      learning_rate: 0.02
+      l2_leaf_reg: 4.0
+      iterations: 1200
+    # 5. Deep + moderate LR — strong on tabular time-series
+    - depth: 10
+      learning_rate: 0.05
+      l2_leaf_reg: 3.0
+      iterations: 800
+    # 6. Shallow + aggressive LR — quick learner for comparison
     - depth: 6
-      learning_rate: 0.07
-      l2_leaf_reg: 2.0
-      iterations: 450
+      learning_rate: 0.10
+      l2_leaf_reg: 1.5
+      iterations: 400
+
+  # LightGBM grid (3 candidates)
+  lgbm_param_grid:
+    # balanced general-purpose
+    - num_leaves: 63
+      learning_rate: 0.05
+      n_estimators: 700
+      reg_lambda: 1.0
+      min_child_samples: 20
+    # deeper — more capacity for complex patterns
+    - num_leaves: 127
+      learning_rate: 0.03
+      n_estimators: 1000
+      reg_lambda: 2.0
+      min_child_samples: 30
+    # shallow + fast — low-variance reference
+    - num_leaves: 31
+      learning_rate: 0.08
+      n_estimators: 500
+      reg_lambda: 0.5
+      min_child_samples: 15
+
+  # XGBoost grid (3 candidates)
+  xgboost_param_grid:
+    # balanced general-purpose
+    - max_depth: 6
+      learning_rate: 0.05
+      n_estimators: 700
+      reg_lambda: 1.0
+      subsample: 0.8
+      colsample_bytree: 0.8
+    # deeper — more capacity
+    - max_depth: 8
+      learning_rate: 0.03
+      n_estimators: 1000
+      reg_lambda: 2.0
+      subsample: 0.8
+      colsample_bytree: 0.7
+    # shallow + fast — low-variance reference
+    - max_depth: 6
+      learning_rate: 0.08
+      n_estimators: 500
+      reg_lambda: 0.5
+      subsample: 0.9
+      colsample_bytree: 0.9
 
 forecast:
   default_horizon_days: 30
-  history_days: 90
+  history_days: 400             # extended from 90 — required for lag_364 yearly feature
 
 chatbot:
   intents_path: chat_intents.json

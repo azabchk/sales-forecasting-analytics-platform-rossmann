@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: sales-forecast-backend-prod
+    runtime: python
+    rootDir: backend
+    autoDeploy: true
+    plan: starter
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: |
+      gunicorn app.main:app -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --workers ${GUNICORN_WORKERS:-2} --timeout ${GUNICORN_TIMEOUT:-120}
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: https://app.yourcompany.com,https://stg-app.yourcompany.com
+      - key: CORS_ALLOW_ORIGINS
+        value: https://app.yourcompany.com,https://stg-app.yourcompany.com
+      - key: MODEL_PATH
+        value: ml/artifacts/model.joblib
+      - key: MODEL_METADATA_PATH
+        value: ml/artifacts/model_metadata.json
+      - key: CONTRACTS_REGISTRY_PATH
+        value: config/input_contract/contracts_registry.yaml
+      - key: SCENARIO_PRICE_ELASTICITY
+        value: "1.0"
+      - key: SCENARIO_MAX_SEGMENT_STORES
+        value: "50"
+      - key: PREFLIGHT_ALERTS_SCHEDULER_ENABLED
+        value: "0"
+      - key: PREFLIGHT_NOTIFICATIONS_SCHEDULER_ENABLED
+        value: "0"

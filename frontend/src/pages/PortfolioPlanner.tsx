@@ -11,13 +11,10 @@ import {
 } from "recharts";
 
 import { extractApiError } from "../api/client";
-import {
-  fetchStores,
-  ForecastBatchResponse,
-  postForecastBatch,
-  Store,
-} from "../api/endpoints";
+import { ForecastBatchResponse } from "../api/endpoints";
 import LoadingBlock from "../components/LoadingBlock";
+import { useForecastBatch, useStores } from "../hooks/useApiQuery";
+import { useToast } from "../components/ui/Toast";
 import { useI18n } from "../lib/i18n";
 import { formatCompact, formatDateLabel, formatInt } from "../lib/format";
 
@@ -41,67 +38,47 @@ function parseStoreIds(raw: string): number[] {
 
 export default function PortfolioPlanner() {
   const { locale, localeTag } = useI18n();
-  const [stores, setStores] = React.useState<Store[]>([]);
-  const [storeIdsInput, setStoreIdsInput] = React.useState("1,2,3,4,5");
+  const { success, error: toastError } = useToast();
+  const [storeIdsInput, setStoreIdsInput] = React.useState("");
   const [horizon, setHorizon] = React.useState(30);
   const [result, setResult] = React.useState<ForecastBatchResponse | null>(null);
-  const [error, setError] = React.useState("");
-  const [loading, setLoading] = React.useState(false);
   const [lastUpdated, setLastUpdated] = React.useState("-");
 
+  const storesQ = useStores();
+
+  // Initialise input with first 5 stores once loaded
   React.useEffect(() => {
-    fetchStores()
-      .then((rows) => {
-        setStores(rows);
-        setStoreIdsInput((current) => {
-          if (current.trim() || rows.length === 0) {
-            return current;
-          }
-          const defaults = rows.slice(0, 5).map((store) => String(store.store_id));
-          return defaults.join(",");
-        });
-      })
-      .catch((errorResponse) => {
-        setError(
-          extractApiError(
-            errorResponse,
-            locale === "ru" ? "Не удалось загрузить магазины." : "Failed to load stores."
-          )
-        );
-      });
-  }, [locale]);
-
-  async function runPortfolioForecast() {
-    const parsedStoreIds = parseStoreIds(storeIdsInput);
-    if (parsedStoreIds.length === 0) {
-      setError(locale === "ru" ? "Укажите минимум один ID магазина." : "Provide at least one store ID.");
-      return;
+    if (!storeIdsInput && storesQ.data?.length) {
+      setStoreIdsInput(storesQ.data.slice(0, 5).map((s) => s.store_id).join(","));
     }
+  }, [storesQ.data, storeIdsInput]);
 
-    setError("");
-    setLoading(true);
-    try {
-      const data = await postForecastBatch({ store_ids: parsedStoreIds, horizon_days: horizon });
+  const batchMutation = useForecastBatch({
+    onSuccess: (data) => {
       setResult(data);
       setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
-    } catch (errorResponse) {
-      setError(
-        extractApiError(
-          errorResponse,
-          locale === "ru"
-            ? "Не удалось выполнить портфельный прогноз."
-            : "Failed to run portfolio forecast."
-        )
-      );
-    } finally {
-      setLoading(false);
+      success(locale === "ru" ? "Прогноз портфеля готов!" : "Portfolio forecast ready!");
+    },
+    onError: (err) => {
+      toastError(extractApiError(err, locale === "ru" ? "Не удалось выполнить портфельный прогноз." : "Failed to run portfolio forecast."));
+    },
+  });
+
+  function runPortfolioForecast() {
+    const parsedStoreIds = parseStoreIds(storeIdsInput);
+    if (parsedStoreIds.length === 0) {
+      toastError(locale === "ru" ? "Укажите минимум один ID магазина." : "Provide at least one store ID.");
+      return;
     }
+    batchMutation.mutate({ store_ids: parsedStoreIds, horizon_days: horizon });
   }
 
   function useTopStores() {
-    const top = stores.slice(0, 10).map((store) => store.store_id);
+    const top = (storesQ.data ?? []).slice(0, 10).map((s) => s.store_id);
     setStoreIdsInput(top.join(","));
   }
+
+  const loading = batchMutation.isPending;
 
   function downloadCsv() {
     if (!result) {
@@ -181,7 +158,7 @@ export default function PortfolioPlanner() {
         </div>
       </div>
 
-      {error && <p className="error">{error}</p>}
+      {batchMutation.error ? <p className="error">{extractApiError(batchMutation.error, "Forecast failed")}</p> : null}
 
       {loading && !result && (
         <div className="panel">
@@ -295,7 +272,7 @@ export default function PortfolioPlanner() {
         </>
       )}
 
-      {!loading && !result && !error && (
+      {!loading && !result && !batchMutation.error && (
         <p className="muted">
           {locale === "ru"
             ? "Укажите магазины и запустите пакетный прогноз."

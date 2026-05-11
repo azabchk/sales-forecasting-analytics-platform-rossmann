@@ -7,7 +7,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from dotenv import load_dotenv
 
-DEFAULT_SQL_FILES = ["01_schema.sql", "02_views_kpi.sql", "03_indexes.sql", "04_v2_ecosystem.sql"]
+DEFAULT_SQL_FILES = ["01_schema.sql", "02_views_kpi.sql", "03_indexes.sql", "04_v2_ecosystem.sql", "05_users.sql"]
 
 
 def resolve_path(base_dir: Path, raw_path: str) -> Path:

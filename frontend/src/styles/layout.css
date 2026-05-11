@@ -13,6 +13,8 @@
   background: linear-gradient(180deg, color-mix(in oklab, var(--bg-elevated) 92%, transparent), var(--bg-soft));
   padding: 20px 16px;
   overflow-y: auto;
+  display: flex;
+  flex-direction: column;
 }
 
 .sidebar-brand {
@@ -169,6 +171,16 @@
   padding: 12px 24px 18px;
 }
 
+.ecosystem-main .footer-meta {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.ecosystem-main .footer-meta code {
+  color: var(--text);
+}
+
 @media (max-width: 1220px) {
   .ecosystem-shell {
     grid-template-columns: 236px minmax(0, 1fr);
@@ -184,16 +196,8 @@
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
-    position: static;
-    height: auto;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
-  }
-
+  /* Sidebar becomes a fixed drawer — handled in styles.css */
   .app-topbar {
-    position: static;
-    flex-direction: column;
-    align-items: flex-start;
+    position: sticky;
   }
 }

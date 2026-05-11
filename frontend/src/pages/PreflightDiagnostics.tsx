@@ -49,6 +49,7 @@ import {
   PreflightTrendsResponse,
   PreflightValidationArtifactResponse,
 } from "../api/endpoints";
+import ConfirmModal from "../components/ui/ConfirmModal";
 import LoadingBlock from "../components/LoadingBlock";
 import StatusBadge from "../components/StatusBadge";
 import { useI18n } from "../lib/i18n";
@@ -210,6 +211,14 @@ export default function PreflightDiagnostics() {
   const [alertsActionLoading, setAlertsActionLoading] = React.useState<Record<string, boolean>>({});
   const [alertsLoading, setAlertsLoading] = React.useState(false);
   const [alertsError, setAlertsError] = React.useState("");
+
+  // ConfirmModal state — replaces window.prompt() for ACK and silence actions
+  const [ackModal, setAckModal] = React.useState<{ open: boolean; alertId: string }>({ open: false, alertId: "" });
+  const [silenceModal, setSilenceModal] = React.useState<{
+    open: boolean;
+    payload: { alertId: string; policyId: string; sourceName?: PreflightSourceName | null; severity?: string | null; ruleId?: string | null; hours: number } | null;
+    defaultReason: string;
+  }>({ open: false, payload: null, defaultReason: "" });
 
   const [selectedSourceName, setSelectedSourceName] = React.useState<PreflightSourceName | null>(null);
   const [activeArtifactTab, setActiveArtifactTab] = React.useState<ArtifactTab>("validation");
@@ -548,19 +557,21 @@ export default function PreflightDiagnostics() {
   );
 
   const handleAckAlert = React.useCallback(
-    async (alertId: string) => {
-      const note = window.prompt(
-        locale === "ru" ? "Комментарий ACK (опционально):" : "ACK note (optional):",
-        ""
-      );
-      if (note === null) {
-        return;
-      }
+    (alertId: string) => {
+      setAckModal({ open: true, alertId });
+    },
+    []
+  );
+
+  const confirmAck = React.useCallback(
+    async (note?: string) => {
+      const { alertId } = ackModal;
+      setAckModal({ open: false, alertId: "" });
       await runAlertAction(`ack:${alertId}`, async () => {
         await postPreflightAlertAcknowledge(alertId, { note: note || undefined });
       });
     },
-    [locale, runAlertAction]
+    [ackModal, runAlertAction]
   );
 
   const handleUnackAlert = React.useCallback(
@@ -573,7 +584,7 @@ export default function PreflightDiagnostics() {
   );
 
   const handleSilenceAlert = React.useCallback(
-    async (payload: {
+    (payload: {
       alertId: string;
       policyId: string;
       sourceName?: PreflightSourceName | null;
@@ -585,27 +596,28 @@ export default function PreflightDiagnostics() {
         locale === "ru"
           ? `Временный silence (${payload.hours}ч) из Diagnostics UI`
           : `Temporary silence (${payload.hours}h) from diagnostics UI`;
-      const reason = window.prompt(
-        locale === "ru" ? "Причина silence:" : "Silence reason:",
-        defaultReason
-      );
-      if (reason === null) {
-        return;
-      }
+      setSilenceModal({ open: true, payload, defaultReason });
+    },
+    [locale]
+  );
+
+  const confirmSilence = React.useCallback(
+    async (reason?: string) => {
+      const { payload, defaultReason } = silenceModal;
+      setSilenceModal({ open: false, payload: null, defaultReason: "" });
+      if (!payload) return;
       await runAlertAction(`silence:${payload.alertId}:${payload.hours}`, async () => {
-        await postPreflightAlertSilence(
-          {
-            ends_at: addHoursIso(payload.hours),
-            reason: reason || defaultReason,
-            policy_id: payload.policyId,
-            source_name: payload.sourceName ?? undefined,
-            severity: payload.severity ?? undefined,
-            rule_id: payload.ruleId ?? undefined,
-          },
-        );
+        await postPreflightAlertSilence({
+          ends_at: addHoursIso(payload.hours),
+          reason: reason || defaultReason,
+          policy_id: payload.policyId,
+          source_name: payload.sourceName ?? undefined,
+          severity: payload.severity ?? undefined,
+          rule_id: payload.ruleId ?? undefined,
+        });
       });
     },
-    [locale, runAlertAction]
+    [silenceModal, runAlertAction]
   );
 
   const handleExpireSilence = React.useCallback(
@@ -1168,6 +1180,25 @@ export default function PreflightDiagnostics() {
   };
 
   return (
+    <>
+      <ConfirmModal
+        open={ackModal.open}
+        title={locale === "ru" ? "Подтвердить ACK" : "Acknowledge Alert"}
+        inputLabel={locale === "ru" ? "Комментарий (необязательно)" : "Note (optional)"}
+        inputPlaceholder={locale === "ru" ? "Введите комментарий..." : "Enter acknowledgement note…"}
+        confirmLabel={locale === "ru" ? "Подтвердить" : "Acknowledge"}
+        onConfirm={confirmAck}
+        onCancel={() => setAckModal({ open: false, alertId: "" })}
+      />
+      <ConfirmModal
+        open={silenceModal.open}
+        title={locale === "ru" ? "Создать Silence" : "Create Silence"}
+        inputLabel={locale === "ru" ? "Причина" : "Reason"}
+        inputPlaceholder={silenceModal.defaultReason}
+        confirmLabel={locale === "ru" ? "Создать" : "Create Silence"}
+        onConfirm={confirmSilence}
+        onCancel={() => setSilenceModal({ open: false, payload: null, defaultReason: "" })}
+      />
     <section className="page">
       <div className="page-head">
         <div>
@@ -2029,5 +2060,6 @@ export default function PreflightDiagnostics() {
         </div>
       </div>
     </section>
+    </>
   );
 }

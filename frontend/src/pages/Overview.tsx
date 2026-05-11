@@ -1,129 +1,112 @@
 import React, { useCallback, useMemo, useState } from "react";
 
-import { extractApiError } from "../api/client";
-import { fetchKpiSummary, fetchSalesTimeseries, fetchStores, KpiSummary, Store } from "../api/endpoints";
+import { API_BASE_URL } from "../api/client";
 import KpiCards from "../components/KpiCards";
-import LoadingBlock from "../components/LoadingBlock";
 import SalesChart from "../components/SalesChart";
 import StoreSelector from "../components/StoreSelector";
+import { ErrorState } from "../components/ui/States";
+import { useKpiSummary, useSalesTimeseries, useStores, useSystemSummary } from "../hooks/useApiQuery";
 import { rangeFromPastDays, rangeYtd } from "../lib/dates";
 import { formatInt, formatPercent } from "../lib/format";
 import { useI18n } from "../lib/i18n";
+import { NoDataState } from "../components/ui/States";
+import LoadingBlock from "../components/LoadingBlock";
 
-type OverviewSalesPoint = {
-  date: string;
-  sales: number;
-  customers: number;
-};
+type OverviewSalesPoint = { date: string; sales: number; customers: number };
 
-function getDefaultRange() {
+function buildRangeFromSummary(dateFrom?: string | null, dateTo?: string | null) {
+  if (dateFrom && dateTo) return { from: dateFrom, to: dateTo };
   return rangeFromPastDays(90);
+}
+
+function buildTrailingRange(dataTo: string | null | undefined, days: number) {
+  const endBound = dataTo ? new Date(dataTo) : new Date();
+  const from = new Date(endBound);
+  from.setDate(from.getDate() - (days - 1));
+  return { from: from.toISOString().slice(0, 10), to: endBound.toISOString().slice(0, 10) };
+}
+
+function buildYtdRange(dataFrom?: string | null, dataTo?: string | null) {
+  if (!dataTo) return rangeYtd();
+  const endBound = new Date(dataTo);
+  const ytdStart = new Date(endBound.getFullYear(), 0, 1);
+  const startBound = dataFrom ? new Date(dataFrom) : ytdStart;
+  const effectiveFrom = ytdStart < startBound ? startBound : ytdStart;
+  return { from: effectiveFrom.toISOString().slice(0, 10), to: endBound.toISOString().slice(0, 10) };
 }
 
 export default function Overview() {
   const { locale, localeTag } = useI18n();
-  const defaults = useMemo(() => getDefaultRange(), []);
 
-  const [stores, setStores] = useState<Store[]>([]);
   const [storeId, setStoreId] = useState<number | undefined>(undefined);
-  const [dateFrom, setDateFrom] = useState(defaults.from);
-  const [dateTo, setDateTo] = useState(defaults.to);
+  const [dateFrom, setDateFrom] = useState(rangeFromPastDays(90).from);
+  const [dateTo, setDateTo] = useState(rangeFromPastDays(90).to);
   const [granularity, setGranularity] = useState<"daily" | "monthly">("daily");
-  const [lastUpdated, setLastUpdated] = useState<string>("-");
+  const [rangeInitialized, setRangeInitialized] = useState(false);
 
-  const [kpi, setKpi] = useState<KpiSummary | null>(null);
-  const [series, setSeries] = useState<OverviewSalesPoint[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string>("");
-  const [storesError, setStoresError] = useState("");
+  const storesQ = useStores();
+  const summaryQ = useSystemSummary();
 
+  // Auto-apply full data range on first load
   React.useEffect(() => {
-    fetchStores()
-      .then(setStores)
-      .catch((errorResponse) =>
-        setStoresError(
-          extractApiError(errorResponse, locale === "ru" ? "Не удалось загрузить список магазинов." : "Failed to load stores list.")
-        )
-      );
-  }, []);
+    if (rangeInitialized || !summaryQ.data) return;
+    const range = buildRangeFromSummary(summaryQ.data.date_from, summaryQ.data.date_to);
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setRangeInitialized(true);
+  }, [summaryQ.data, rangeInitialized]);
 
   const invalidRange = dateFrom > dateTo;
 
   const applyPreset = useCallback((type: "30d" | "90d" | "365d" | "ytd") => {
-    const range = type === "ytd" ? rangeYtd() : rangeFromPastDays(type === "30d" ? 30 : type === "90d" ? 90 : 365);
+    const dt = summaryQ.data?.date_to;
+    const df = summaryQ.data?.date_from;
+    const range = type === "ytd"
+      ? buildYtdRange(df, dt)
+      : buildTrailingRange(dt, type === "30d" ? 30 : type === "90d" ? 90 : 365);
     setDateFrom(range.from);
     setDateTo(range.to);
-  }, []);
+  }, [summaryQ.data]);
 
-  const load = useCallback(async () => {
-    if (invalidRange) {
-      return;
-    }
+  const resetFilters = useCallback(() => {
+    const range = buildRangeFromSummary(summaryQ.data?.date_from, summaryQ.data?.date_to);
+    setStoreId(undefined);
+    setGranularity("daily");
+    setDateFrom(range.from);
+    setDateTo(range.to);
+  }, [summaryQ.data]);
 
-    setLoading(true);
-    setError("");
+  const kpiQ = useKpiSummary({ date_from: dateFrom, date_to: dateTo, store_id: storeId }, { enabled: !invalidRange });
+  const seriesQ = useSalesTimeseries({ granularity, date_from: dateFrom, date_to: dateTo, store_id: storeId }, { enabled: !invalidRange });
 
-    try {
-      const [kpiResp, seriesResp] = await Promise.all([
-        fetchKpiSummary({ date_from: dateFrom, date_to: dateTo, store_id: storeId }),
-        fetchSalesTimeseries({
-          granularity,
-          date_from: dateFrom,
-          date_to: dateTo,
-          store_id: storeId,
-        }),
-      ]);
-
-      const grouped = Object.values(
-        seriesResp.reduce<Record<string, OverviewSalesPoint>>((acc, row) => {
-          if (!acc[row.date]) {
-            acc[row.date] = { date: row.date, sales: 0, customers: 0 };
-          }
-          acc[row.date].sales += row.sales;
-          acc[row.date].customers += row.customers;
-          return acc;
-        }, {})
-      ).sort((a, b) => a.date.localeCompare(b.date));
-
-      setKpi(kpiResp);
-      setSeries(grouped);
-      setLastUpdated(new Date().toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" }));
-    } catch (errorResponse) {
-      setError(
-        extractApiError(
-          errorResponse,
-          locale === "ru"
-            ? "Не удалось загрузить метрики обзора. Проверьте backend и диапазон дат."
-            : "Failed to load overview metrics. Ensure backend is running and date range is valid."
-        )
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [dateFrom, dateTo, granularity, invalidRange, locale, localeTag, storeId]);
-
-  React.useEffect(() => {
-    load();
-  }, [load]);
+  const series = useMemo<OverviewSalesPoint[]>(() => {
+    if (!seriesQ.data) return [];
+    return Object.values(
+      seriesQ.data.reduce<Record<string, OverviewSalesPoint>>((acc, row) => {
+        if (!acc[row.date]) acc[row.date] = { date: row.date, sales: 0, customers: 0 };
+        acc[row.date].sales += row.sales;
+        acc[row.date].customers += row.customers;
+        return acc;
+      }, {})
+    ).sort((a, b) => a.date.localeCompare(b.date));
+  }, [seriesQ.data]);
 
   const insights = useMemo(() => {
-    if (series.length === 0) {
-      return null;
-    }
-
+    if (series.length === 0) return null;
     const first = series[0].sales;
     const last = series[series.length - 1].sales;
-    const peakRow = series.reduce((peak, row) => (row.sales > peak.sales ? row : peak), series[0]);
+    const peakRow = series.reduce((p, r) => (r.sales > p.sales ? r : p), series[0]);
     const trend = first > 0 ? ((last - first) / first) * 100 : 0;
     const spanDays = Math.max(1, Math.round((new Date(dateTo).getTime() - new Date(dateFrom).getTime()) / 86_400_000) + 1);
-
-    return {
-      peakDate: peakRow.date,
-      peakSales: peakRow.sales,
-      trend,
-      spanDays,
-    };
+    return { peakDate: peakRow.date, peakSales: peakRow.sales, trend, spanDays };
   }, [dateFrom, dateTo, series]);
+
+  const lastUpdated = seriesQ.dataUpdatedAt
+    ? new Date(seriesQ.dataUpdatedAt).toLocaleTimeString(localeTag, { hour: "2-digit", minute: "2-digit" })
+    : "-";
+
+  const isLoading = kpiQ.isLoading || seriesQ.isLoading;
+  const error = kpiQ.error || seriesQ.error;
 
   return (
     <section className="page">
@@ -137,82 +120,62 @@ export default function Overview() {
           </p>
         </div>
         <div className="inline-meta">
-          <p className="meta-text">{locale === "ru" ? "Последнее обновление" : "Last update"}: {lastUpdated}</p>
+          <p className="meta-text">{locale === "ru" ? "Обновлено" : "Updated"}: {lastUpdated}</p>
           <div className="preset-row">
-            <button className="button ghost" onClick={() => applyPreset("30d")} type="button">
-              30D
-            </button>
-            <button className="button ghost" onClick={() => applyPreset("90d")} type="button">
-              90D
-            </button>
-            <button className="button ghost" onClick={() => applyPreset("365d")} type="button">
-              1Y
-            </button>
-            <button className="button ghost" onClick={() => applyPreset("ytd")} type="button">
-              YTD
-            </button>
+            {(["30d", "90d", "365d", "ytd"] as const).map((p) => (
+              <button key={p} className="button ghost" onClick={() => applyPreset(p)} type="button">
+                {p === "ytd" ? "YTD" : p === "365d" ? "1Y" : p === "90d" ? "90D" : "30D"}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       <div className="panel">
         <div className="controls">
-          <StoreSelector stores={stores} value={storeId} onChange={setStoreId} label={locale === "ru" ? "Фокус по магазину" : "Store focus"} includeAllOption id="overview-store" />
+          <StoreSelector
+            stores={storesQ.data ?? []}
+            value={storeId}
+            onChange={setStoreId}
+            label={locale === "ru" ? "Фокус по магазину" : "Store focus"}
+            includeAllOption
+            id="overview-store"
+          />
           <div className="field">
-            <label htmlFor="overview-date-from">{locale === "ru" ? "Дата с" : "Date from"}</label>
-            <input
-              id="overview-date-from"
-              className="input"
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-            />
+            <label htmlFor="ov-date-from">{locale === "ru" ? "Дата с" : "Date from"}</label>
+            <input id="ov-date-from" className="input" type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="overview-date-to">{locale === "ru" ? "Дата по" : "Date to"}</label>
-            <input
-              id="overview-date-to"
-              className="input"
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-            />
+            <label htmlFor="ov-date-to">{locale === "ru" ? "Дата по" : "Date to"}</label>
+            <input id="ov-date-to" className="input" type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
           </div>
           <div className="field">
-            <label htmlFor="overview-granularity">{locale === "ru" ? "Гранулярность" : "Granularity"}</label>
-            <select
-              id="overview-granularity"
-              className="select"
-              value={granularity}
-              onChange={(e) => setGranularity(e.target.value as "daily" | "monthly")}
-            >
+            <label htmlFor="ov-gran">{locale === "ru" ? "Гранулярность" : "Granularity"}</label>
+            <select id="ov-gran" className="select" value={granularity} onChange={(e) => setGranularity(e.target.value as "daily" | "monthly")}>
               <option value="daily">{locale === "ru" ? "День" : "Daily"}</option>
               <option value="monthly">{locale === "ru" ? "Месяц" : "Monthly"}</option>
             </select>
           </div>
-          <button className="button primary" onClick={load} disabled={loading || invalidRange}>
-            {loading ? (locale === "ru" ? "Загрузка..." : "Loading...") : locale === "ru" ? "Обновить" : "Refresh"}
+          <button className="button primary" onClick={() => { kpiQ.refetch(); seriesQ.refetch(); }} disabled={isLoading || invalidRange}>
+            {isLoading ? (locale === "ru" ? "Загрузка..." : "Loading...") : locale === "ru" ? "Обновить" : "Refresh"}
           </button>
         </div>
       </div>
 
-      {storesError && <p className="error">{storesError}</p>}
       {invalidRange && <p className="error">{locale === "ru" ? "Дата начала не может быть позже даты окончания." : "Date from cannot be greater than Date to."}</p>}
-      {error && <p className="error">{error}</p>}
+      {error ? <ErrorState message={(error as Error).message} onRetry={() => { kpiQ.refetch(); seriesQ.refetch(); }} /> : null}
 
-      {loading && !kpi && (
-        <div className="panel">
-          <LoadingBlock lines={4} className="loading-stack" />
-        </div>
+      {isLoading && !kpiQ.data && (
+        <div className="panel"><LoadingBlock lines={4} className="loading-stack" /></div>
       )}
 
-      {kpi && (
+      {kpiQ.data && (
         <KpiCards
-          totalSales={kpi.total_sales}
-          totalCustomers={kpi.total_customers}
-          avgDailySales={kpi.avg_daily_sales}
-          promoDays={kpi.promo_days}
-          openDays={kpi.open_days}
+          totalSales={kpiQ.data.total_sales}
+          totalCustomers={kpiQ.data.total_customers}
+          avgDailySales={kpiQ.data.avg_daily_sales}
+          promoDays={kpiQ.data.promo_days}
+          openDays={kpiQ.data.open_days}
         />
       )}
 
@@ -223,14 +186,12 @@ export default function Overview() {
             <p className="insight-value">{formatInt(insights.spanDays)} {locale === "ru" ? "дней" : "days"}</p>
           </div>
           <div className="insight-card">
-            <p className="insight-label">{locale === "ru" ? "Направление тренда" : "Trend Direction"}</p>
+            <p className="insight-label">{locale === "ru" ? "Тренд" : "Trend Direction"}</p>
             <p className={`insight-value ${insights.trend >= 0 ? "positive" : "negative"}`}>{formatPercent(insights.trend)}</p>
           </div>
           <div className="insight-card">
             <p className="insight-label">{locale === "ru" ? "Пик продаж" : "Peak Sales Day"}</p>
-            <p className="insight-value">
-              {formatInt(insights.peakSales)} {locale === "ru" ? "в" : "on"} {insights.peakDate}
-            </p>
+            <p className="insight-value">{formatInt(insights.peakSales)} {locale === "ru" ? "в" : "on"} {insights.peakDate}</p>
           </div>
         </div>
       )}
@@ -238,7 +199,16 @@ export default function Overview() {
       {series.length > 0 ? (
         <SalesChart data={series} title={locale === "ru" ? "Тренд общих продаж" : "Total Sales Trend"} granularity={granularity} />
       ) : (
-        !loading && <p className="muted">{locale === "ru" ? "Нет данных продаж для выбранных фильтров." : "No sales rows for selected filters."}</p>
+        !isLoading && (
+          <NoDataState
+            message={locale === "ru" ? "Нет данных продаж для выбранных фильтров." : "No sales rows for selected filters."}
+            filtersLabel={`store=${storeId ?? "all"}, from=${dateFrom}, to=${dateTo}`}
+            apiBaseUrl={API_BASE_URL}
+            hint={locale === "ru" ? "Подсказка: DEMO=1 bash scripts/dev_up.sh" : "Hint: DEMO=1 bash scripts/dev_up.sh"}
+            onReset={resetFilters}
+            resetLabel={locale === "ru" ? "Сбросить фильтры" : "Reset filters"}
+          />
+        )
       )}
     </section>
   );

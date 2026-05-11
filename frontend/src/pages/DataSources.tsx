@@ -9,19 +9,15 @@ import {
 } from "../api/endpoints";
 import PageLayout from "../components/layout/PageLayout";
 import Card from "../components/ui/Card";
-import DataTable from "../components/ui/DataTable";
+import { SmartColumn, SmartTable } from "../components/ui/DataTable";
 import { EmptyState, ErrorState, LoadingState } from "../components/ui/States";
 import StatusBadge from "../components/StatusBadge";
 import { useI18n } from "../lib/i18n";
 
 function formatDateTime(value: string | null | undefined, localeTag: string): string {
-  if (!value) {
-    return "-";
-  }
+  if (!value) return "-";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return value;
-  }
+  if (Number.isNaN(parsed.getTime())) return value;
   return parsed.toLocaleString(localeTag, { dateStyle: "medium", timeStyle: "short" });
 }
 
@@ -47,13 +43,8 @@ export default function DataSourcesPage() {
       const response = await fetchDataSources({ include_inactive: true });
       setSources(response);
       setSelectedId((current) => current ?? (response[0]?.id ?? null));
-    } catch (errorResponse) {
-      setError(
-        extractApiError(
-          errorResponse,
-          locale === "ru" ? "Не удалось загрузить источники данных." : "Failed to load data sources."
-        )
-      );
+    } catch (err) {
+      setError(extractApiError(err, locale === "ru" ? "Не удалось загрузить источники данных." : "Failed to load data sources."));
     } finally {
       setLoading(false);
     }
@@ -61,24 +52,14 @@ export default function DataSourcesPage() {
 
   const loadRuns = React.useCallback(
     async (dataSourceId: number | null) => {
-      if (!dataSourceId) {
-        setRuns([]);
-        return;
-      }
+      if (!dataSourceId) { setRuns([]); return; }
       setRunsLoading(true);
       setRunsError("");
       try {
-        const response = await fetchDataSourcePreflightRuns(dataSourceId, { limit: 25 });
+        const response = await fetchDataSourcePreflightRuns(dataSourceId, { limit: 50 });
         setRuns(response);
-      } catch (errorResponse) {
-        setRunsError(
-          extractApiError(
-            errorResponse,
-            locale === "ru"
-              ? "Не удалось загрузить preflight-историю источника."
-              : "Failed to load source preflight history."
-          )
-        );
+      } catch (err) {
+        setRunsError(extractApiError(err, locale === "ru" ? "Не удалось загрузить preflight-историю." : "Failed to load preflight history."));
       } finally {
         setRunsLoading(false);
       }
@@ -86,125 +67,94 @@ export default function DataSourcesPage() {
     [locale]
   );
 
-  React.useEffect(() => {
-    loadSources();
-  }, [loadSources]);
+  React.useEffect(() => { loadSources(); }, [loadSources]);
+  React.useEffect(() => { loadRuns(selectedId); }, [loadRuns, selectedId]);
 
-  React.useEffect(() => {
-    loadRuns(selectedId);
-  }, [loadRuns, selectedId]);
+  const sourceColumns: SmartColumn<Record<string, unknown>>[] = [
+    {
+      key: "name", label: locale === "ru" ? "Источник" : "Source", sortable: true, searchable: true,
+      render: (_, row) => (
+        <span>
+          <strong>{String(row.name ?? "")}</strong>
+          {row.description ? <span className="muted"> — {String(row.description)}</span> : null}
+        </span>
+      ),
+    },
+    { key: "source_type", label: locale === "ru" ? "Тип" : "Type", sortable: true },
+    {
+      key: "is_active", label: locale === "ru" ? "Активен" : "Active", sortable: true,
+      render: (v) => <StatusBadge status={v ? "PASS" : "SKIPPED"} />,
+    },
+    {
+      key: "last_preflight_status", label: locale === "ru" ? "Последний preflight" : "Last Preflight",
+      render: (v) => v ? <StatusBadge status={String(v)} /> : <span className="muted">—</span>,
+    },
+    {
+      key: "last_preflight_at", label: locale === "ru" ? "Время" : "Timestamp",
+      render: (v) => formatDateTime(v as string | null, localeTag),
+    },
+  ];
+
+  const runsColumns: SmartColumn<Record<string, unknown>>[] = [
+    { key: "run_id", label: "Run ID", searchable: true, render: (v) => <span className="mono-small">{String(v ?? "")}</span> },
+    { key: "source_name", label: locale === "ru" ? "Источник" : "Source", sortable: true },
+    { key: "validation_status", label: "Validation", sortable: true, render: (v) => <StatusBadge status={String(v ?? "")} /> },
+    { key: "semantic_status", label: "Semantic", sortable: true, render: (v) => <StatusBadge status={String(v ?? "")} /> },
+    { key: "final_status", label: locale === "ru" ? "Итог" : "Final", sortable: true, render: (v) => <StatusBadge status={String(v ?? "")} /> },
+    { key: "created_at", label: locale === "ru" ? "Время" : "Created", sortable: true, render: (v) => formatDateTime(v as string | null, localeTag) },
+  ];
 
   return (
     <PageLayout
       title={locale === "ru" ? "Источники данных" : "Data Sources"}
-      subtitle={
-        locale === "ru"
-          ? "Мультиклиентный реестр подключений и их статус preflight."
-          : "Multi-client source registry with preflight lineage."
-      }
+      subtitle={locale === "ru" ? "Мультиклиентный реестр подключений и их статус preflight." : "Multi-client source registry with preflight lineage."}
       actions={
         <button className="button primary" onClick={loadSources} type="button" disabled={loading}>
           {loading ? (locale === "ru" ? "Обновление..." : "Refreshing...") : locale === "ru" ? "Обновить" : "Refresh"}
         </button>
       }
     >
-      {error ? <ErrorState message={error} /> : null}
+      {error ? <ErrorState message={error} onRetry={loadSources} /> : null}
       {loading && sources.length === 0 ? <LoadingState lines={5} /> : null}
-
-      {!loading && sources.length === 0 ? (
+      {!loading && !error && sources.length === 0 ? (
         <EmptyState message={locale === "ru" ? "Источники данных не найдены." : "No data sources found."} />
       ) : null}
 
       {sources.length > 0 ? (
         <Card
           title={locale === "ru" ? "Реестр источников" : "Source Registry"}
-          subtitle={
-            locale === "ru"
-              ? "Выберите источник, чтобы посмотреть последние preflight-запуски."
-              : "Select a source to inspect recent preflight runs."
-          }
+          subtitle={locale === "ru" ? "Выберите источник, чтобы посмотреть preflight-запуски." : "Select a source to inspect recent preflight runs."}
         >
-          <DataTable>
-            <thead>
-              <tr>
-                <th>{locale === "ru" ? "Источник" : "Source"}</th>
-                <th>{locale === "ru" ? "Тип" : "Type"}</th>
-                <th>{locale === "ru" ? "Активен" : "Active"}</th>
-                <th>{locale === "ru" ? "Последний preflight" : "Last Preflight"}</th>
-                <th>{locale === "ru" ? "Время" : "Timestamp"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sources.map((source) => (
-                <tr
-                  key={source.id}
-                  onClick={() => setSelectedId(source.id)}
-                  className={source.id === selectedId ? "table-row-active" : ""}
-                >
-                  <td>
-                    <strong>{source.name}</strong>
-                    <p className="muted">{source.description || "-"}</p>
-                  </td>
-                  <td>{source.source_type}</td>
-                  <td>
-                    <StatusBadge status={source.is_active ? "PASS" : "SKIPPED"} />
-                  </td>
-                  <td>{source.last_preflight_status ? <StatusBadge status={source.last_preflight_status} /> : "-"}</td>
-                  <td>{formatDateTime(source.last_preflight_at, localeTag)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
+          <SmartTable
+            columns={sourceColumns}
+            data={sources as Record<string, unknown>[]}
+            pageSize={20}
+            searchable
+            searchPlaceholder={locale === "ru" ? "Поиск источника..." : "Search sources…"}
+            rowKeyField="id"
+            selectedKey={selectedId ?? undefined}
+            onRowClick={(row) => setSelectedId(row.id as number)}
+            emptyMessage={locale === "ru" ? "Нет источников." : "No sources."}
+          />
         </Card>
       ) : null}
 
       {selected ? (
         <Card
-          title={
-            locale === "ru"
-              ? `Preflight-запуски: ${selected.name}`
-              : `Preflight Runs: ${selected.name}`
-          }
-          subtitle={
-            locale === "ru"
-              ? "Результаты последних валидаций и семантических проверок."
-              : "Recent validation and semantic quality runs."
-          }
+          title={locale === "ru" ? `Preflight-запуски: ${selected.name}` : `Preflight Runs: ${selected.name}`}
+          subtitle={locale === "ru" ? "Результаты последних валидаций и семантических проверок." : "Recent validation and semantic quality runs."}
         >
           {runsError ? <p className="error">{runsError}</p> : null}
-          {runsLoading ? (
-            <LoadingState lines={3} />
-          ) : runs.length === 0 ? (
-            <p className="muted">
-              {locale === "ru"
-                ? "Для источника пока нет запусков preflight."
-                : "No preflight runs available for this source yet."}
-            </p>
-          ) : (
-            <DataTable>
-              <thead>
-                <tr>
-                  <th>{locale === "ru" ? "Run ID" : "Run ID"}</th>
-                  <th>{locale === "ru" ? "Источник" : "Source"}</th>
-                  <th>{locale === "ru" ? "Validation" : "Validation"}</th>
-                  <th>{locale === "ru" ? "Semantic" : "Semantic"}</th>
-                  <th>{locale === "ru" ? "Итог" : "Final"}</th>
-                  <th>{locale === "ru" ? "Время" : "Created"}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((row) => (
-                  <tr key={`${row.run_id}-${row.source_name}`}>
-                    <td className="mono-small">{row.run_id}</td>
-                    <td>{row.source_name}</td>
-                    <td><StatusBadge status={row.validation_status} /></td>
-                    <td><StatusBadge status={row.semantic_status} /></td>
-                    <td><StatusBadge status={row.final_status} /></td>
-                    <td>{formatDateTime(row.created_at, localeTag)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </DataTable>
+          {runsLoading ? <LoadingState lines={3} /> : (
+            <SmartTable
+              columns={runsColumns}
+              data={runs as Record<string, unknown>[]}
+              pageSize={25}
+              searchable
+              searchPlaceholder={locale === "ru" ? "Поиск по run ID..." : "Search by run ID…"}
+              rowKeyField="run_id"
+              emptyMessage={locale === "ru" ? "Нет preflight-запусков." : "No preflight runs."}
+            />
           )}
         </Card>
       ) : null}

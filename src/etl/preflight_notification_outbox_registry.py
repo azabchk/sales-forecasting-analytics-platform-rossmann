@@ -416,23 +416,16 @@ def query_outbox_items(
     if date_field not in date_column_map:
         raise ValueError(f"Unsupported date_field '{date_field}'. Use one of {sorted(date_column_map)}.")
 
-    query = sa.select(_OUTBOX_TABLE)
-    if statuses:
-        normalized_statuses = tuple(str(status).strip().upper() for status in statuses if str(status).strip())
-        if normalized_statuses:
-            query = query.where(sa.func.upper(_OUTBOX_TABLE.c.status).in_(normalized_statuses))
-    if event_type:
-        query = query.where(sa.func.upper(_OUTBOX_TABLE.c.event_type) == str(event_type).strip().upper())
-    if channel_target:
-        query = query.where(_OUTBOX_TABLE.c.channel_target == str(channel_target).strip())
-
     selected_date_column = date_column_map[date_field]
-    if date_from is not None:
-        normalized_from = _ensure_datetime(date_from, default_now=False)
-        query = query.where(selected_date_column >= normalized_from)
-    if date_to is not None:
-        normalized_to = _ensure_datetime(date_to, default_now=False)
-        query = query.where(selected_date_column <= normalized_to)
+    query = _apply_outbox_filters(
+        sa.select(_OUTBOX_TABLE),
+        statuses=statuses,
+        event_type=event_type,
+        channel_target=channel_target,
+        date_from=date_from,
+        date_to=date_to,
+        date_column=selected_date_column,
+    )
 
     query = query.order_by(selected_date_column.desc() if descending else selected_date_column.asc())
     if limit is not None:
@@ -441,3 +434,92 @@ def query_outbox_items(
     with engine.connect() as conn:
         rows = conn.execute(query).mappings().all()
     return [_serialize_row(dict(row)) for row in rows]
+
+
+def _apply_outbox_filters(
+    query: sa.sql.Select,
+    *,
+    statuses: tuple[str, ...] | None,
+    event_type: str | None,
+    channel_target: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    date_column: sa.Column[Any],
+) -> sa.sql.Select:
+    if statuses:
+        normalized_statuses = tuple(str(status).strip().upper() for status in statuses if str(status).strip())
+        if normalized_statuses:
+            query = query.where(sa.func.upper(_OUTBOX_TABLE.c.status).in_(normalized_statuses))
+    if event_type:
+        query = query.where(sa.func.upper(_OUTBOX_TABLE.c.event_type) == str(event_type).strip().upper())
+    if channel_target:
+        query = query.where(_OUTBOX_TABLE.c.channel_target == str(channel_target).strip())
+    if date_from is not None:
+        normalized_from = _ensure_datetime(date_from, default_now=False)
+        query = query.where(date_column >= normalized_from)
+    if date_to is not None:
+        normalized_to = _ensure_datetime(date_to, default_now=False)
+        query = query.where(date_column <= normalized_to)
+    return query
+
+
+def count_outbox_items(
+    *,
+    statuses: tuple[str, ...] | None = None,
+    event_type: str | None = None,
+    channel_target: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    date_field: str = "created_at",
+    replayed_only: bool = False,
+    database_url: str | None = None,
+) -> int:
+    engine = _ensure_outbox_table(database_url)
+    date_column_map = {
+        "created_at": _OUTBOX_TABLE.c.created_at,
+        "updated_at": _OUTBOX_TABLE.c.updated_at,
+        "sent_at": _OUTBOX_TABLE.c.sent_at,
+    }
+    if date_field not in date_column_map:
+        raise ValueError(f"Unsupported date_field '{date_field}'. Use one of {sorted(date_column_map)}.")
+    selected_date_column = date_column_map[date_field]
+
+    query = _apply_outbox_filters(
+        sa.select(sa.func.count()).select_from(_OUTBOX_TABLE),
+        statuses=statuses,
+        event_type=event_type,
+        channel_target=channel_target,
+        date_from=date_from,
+        date_to=date_to,
+        date_column=selected_date_column,
+    )
+    if replayed_only:
+        query = query.where(_OUTBOX_TABLE.c.replayed_from_id.is_not(None))
+
+    with engine.connect() as conn:
+        total = conn.execute(query).scalar_one()
+    return int(total or 0)
+
+
+def get_oldest_outbox_created_at(
+    *,
+    statuses: tuple[str, ...] | None = None,
+    event_type: str | None = None,
+    channel_target: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    database_url: str | None = None,
+) -> datetime | None:
+    engine = _ensure_outbox_table(database_url)
+    query = _apply_outbox_filters(
+        sa.select(sa.func.min(_OUTBOX_TABLE.c.created_at)).select_from(_OUTBOX_TABLE),
+        statuses=statuses,
+        event_type=event_type,
+        channel_target=channel_target,
+        date_from=date_from,
+        date_to=date_to,
+        date_column=_OUTBOX_TABLE.c.created_at,
+    )
+    with engine.connect() as conn:
+        value = conn.execute(query).scalar_one_or_none()
+    return _ensure_datetime(value, default_now=False)

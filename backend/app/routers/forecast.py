@@ -1,4 +1,8 @@
-﻿from fastapi import APIRouter, HTTPException
+﻿import logging
+
+from fastapi import APIRouter, HTTPException
+
+logger = logging.getLogger("app.routers.forecast")
 
 from app.schemas import (
     ForecastBatchRequest,
@@ -28,7 +32,8 @@ def forecast_sales(payload: ForecastRequest) -> list[ForecastPoint]:
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Forecast error: {exc}") from exc
+        logger.exception("Unexpected error in /forecast: %s", exc)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the forecast.") from exc
 
 
 @router.post("/forecast/scenario", response_model=ForecastScenarioResponse)
@@ -52,7 +57,8 @@ def forecast_sales_scenario(payload: ForecastScenarioRequest) -> ForecastScenari
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Scenario forecast error: {exc}") from exc
+        logger.exception("Unexpected error in /forecast/scenario: %s", exc)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the scenario forecast.") from exc
 
 
 @router.post(
@@ -75,4 +81,5 @@ def forecast_sales_batch(payload: ForecastBatchRequest) -> ForecastBatchResponse
     except FileNotFoundError as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Batch forecast error: {exc}") from exc
+        logger.exception("Unexpected error in /forecast/batch: %s", exc)
+        raise HTTPException(status_code=500, detail="An unexpected error occurred while generating the batch forecast.") from exc

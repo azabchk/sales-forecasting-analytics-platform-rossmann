@@ -37,6 +37,9 @@ jobs:
             cp .env.example .env
           fi
 
+      - name: Generate synthetic smoke data (if data/train.csv absent)
+        run: python scripts/generate_smoke_data.py
+
       - name: Run smoke script
         env:
           ML_SMOKE_MODE: "1"
